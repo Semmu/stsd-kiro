@@ -12,6 +12,9 @@ yarn-error.log*
 # Token storage
 .tokens.json
 
+# Database
+shuffle.db
+
 # Logs
 logs
 *.log

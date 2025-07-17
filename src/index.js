@@ -1,5 +1,6 @@
 const express = require('express');
 const spotifyClient = require('./spotify');
+const database = require('./database');
 require('dotenv').config();
 
 const app = express();
@@ -73,7 +74,15 @@ const shuffleCheckInterval = setInterval(() => {
   // TODO: Implement periodic shuffle logic
 }, 30000);
 
-app.listen(PORT, () => {
-  console.log(`STSD running on port ${PORT}`);
-  console.log(`Health check: http://localhost:${PORT}/health`);
-});
+// Initialize database and start server
+database.initialize()
+  .then(() => {
+    app.listen(PORT, () => {
+      console.log(`STSD running on port ${PORT}`);
+      console.log(`Health check: http://localhost:${PORT}/health`);
+    });
+  })
+  .catch((error) => {
+    console.error('Failed to initialize database:', error);
+    process.exit(1);
+  });
