@@ -122,7 +122,8 @@ app.get('/api/shuffle/start/spotify::contextType::contextId', async (req, res) =
         const selectedTrack = leastPlayedTracks.splice(randomIndex, 1)[0];
         
         await spotifyClient.addToQueue(selectedTrack.track_id);
-        console.log(`Initially queued least-played track: ${selectedTrack.track_id} (played ${selectedTrack.play_count} times)`);
+        await database.incrementPlayCount(contextUri, selectedTrack.track_id);
+        console.log(`Initially queued least-played track: ${selectedTrack.track_id} (played ${selectedTrack.play_count} times, now ${selectedTrack.play_count + 1})`);
       }
     }
 
@@ -173,27 +174,14 @@ const shuffleCheckInterval = setInterval(async () => {
           const selectedTrack = leastPlayedTracks.splice(randomIndex, 1)[0];
 
           await spotifyClient.addToQueue(selectedTrack.track_id);
-          console.log(`Queued least-played track: ${selectedTrack.track_id} (played ${selectedTrack.play_count} times)`);
+          await database.incrementPlayCount(shuffleState.currentContext, selectedTrack.track_id);
+          console.log(`Queued least-played track: ${selectedTrack.track_id} (played ${selectedTrack.play_count} times, now ${selectedTrack.play_count + 1})`);
         }
 
         shuffleState.setLastManagedTrack(currentPlayback?.item?.uri || null);
       }
 
-    } else if (currentPlayback && currentPlayback.is_playing) {
-      // Check if current track finished and increment play count
-      const currentTrackUri = currentPlayback.item?.uri;
-      const progress = currentPlayback.progress_ms;
-      const duration = currentPlayback.item?.duration_ms;
-
-      // If track is near the end (within 10 seconds), increment play count
-      if (currentTrackUri && duration && progress && (duration - progress) < 10000) {
-        if (shuffleState.lastManagedTrack !== currentTrackUri) {
-          await database.incrementPlayCount(shuffleState.currentContext, currentTrackUri);
-          shuffleState.setLastManagedTrack(currentTrackUri);
-          console.log(`Incremented play count for: ${currentTrackUri}`);
-        }
-      }
-
+    } else {
       console.log('Playback under our control, monitoring...');
     }
   } catch (error) {
