@@ -23,19 +23,19 @@ class SpotifyClient {
                 this.refreshToken = tokens.refresh_token;
                 this.expiresAt = tokens.expires_at;
 
-                // Check if token is still valid (with 5 min buffer)
+                // Initialize API with stored tokens (even if expired - will refresh automatically)
+                this.api = SpotifyApi.withAccessToken(process.env.SPOTIFY_CLIENT_ID, {
+                    access_token: this.accessToken,
+                    refresh_token: this.refreshToken,
+                    expires_in: this.expiresAt ? Math.max(0, Math.floor((this.expiresAt - Date.now()) / 1000)) : 0
+                });
+                this.isAuthenticated = true;
+
                 const now = Date.now();
                 if (this.expiresAt && now < (this.expiresAt - 300000)) {
-                    // Token is still valid, initialize API
-                    this.api = SpotifyApi.withAccessToken(process.env.SPOTIFY_CLIENT_ID, {
-                        access_token: this.accessToken,
-                        refresh_token: this.refreshToken,
-                        expires_in: Math.floor((this.expiresAt - now) / 1000)
-                    });
-                    this.isAuthenticated = true;
-                    console.log('Loaded existing Spotify tokens');
+                    console.log('Loaded existing Spotify tokens (valid)');
                 } else {
-                    console.log('Stored tokens expired, will need re-authentication');
+                    console.log('Loaded existing Spotify tokens (expired - will refresh automatically)');
                 }
             }
         } catch (error) {
@@ -59,6 +59,8 @@ class SpotifyClient {
             console.error('Failed to save tokens:', error);
         }
     }
+
+
 
     // Initialize with client credentials (for basic API access)
     async initializeClientCredentials() {
