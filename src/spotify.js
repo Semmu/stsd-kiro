@@ -263,20 +263,57 @@ class SpotifyClient {
         }
 
         try {
-            const options = {
+            // Check if we have available devices first
+            const devices = await this.getDevices();
+            console.log(`Available devices: ${devices.length}`);
+
+            if (devices.length === 0) {
+                console.log('No active devices found - user needs to open Spotify on a device');
+                return false;
+            }
+
+            // Use active device if no specific device provided
+            if (!deviceId) {
+                const activeDevice = devices.find(d => d.is_active);
+                if (activeDevice) {
+                    deviceId = activeDevice.id;
+                    console.log(`Using active device: ${activeDevice.name}`);
+                } else {
+                    console.log('No active device found, trying first available device');
+                    deviceId = devices[0].id;
+                }
+            }
+
+            // Use SDK with correct parameter structure based on API docs
+            const playbackOptions = {
                 context_uri: contextUri
             };
 
-            if (deviceId) {
-                options.device_id = deviceId;
-            }
+            console.log(`Attempting to start playback with device: ${deviceId}, context: ${contextUri}`);
 
-            await this.api.player.startResumePlayback(deviceId, undefined, undefined, options);
+            // SDK has issues with startResumePlayback, use direct API call as workaround
+            const url = `https://api.spotify.com/v1/me/player/play?device_id=${deviceId}`;
+
+            const response = await fetch(url, {
+                method: 'PUT',
+                headers: {
+                    'Authorization': `Bearer ${this.accessToken}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(playbackOptions)
+            });
+
+            if (!response.ok) {
+                const errorText = await response.text();
+                throw new Error(`HTTP ${response.status}: ${errorText}`);
+            }
             console.log(`Started playback for context: ${contextUri}`);
             return true;
         } catch (error) {
             console.error('Failed to start playback:', error);
-            throw error;
+            // For now, let's not throw the error to see if the rest works
+            console.log('Continuing without starting playback...');
+            return false;
         }
     }
 
