@@ -1,4 +1,5 @@
 const express = require('express');
+const spotifyClient = require('./spotify');
 require('dotenv').config();
 
 const app = express();
@@ -15,8 +16,31 @@ app.get('/health', (req, res) => {
 app.get('/api/status', (req, res) => {
   res.json({
     message: 'STSD (Spotify True Shuffle Daemon) is running',
-    version: '1.0.0'
+    version: '1.0.0',
+    authenticated: spotifyClient.isUserAuthenticated()
   });
+});
+
+// Auth routes
+app.get('/auth/login', (req, res) => {
+  const authUrl = spotifyClient.getAuthUrl();
+  res.redirect(authUrl);
+});
+
+app.get('/auth/callback', async (req, res) => {
+  const { code } = req.query;
+
+  if (!code) {
+    return res.status(400).json({ error: 'Authorization code missing' });
+  }
+
+  const success = await spotifyClient.handleCallback(code);
+
+  if (success) {
+    res.json({ message: 'Authentication successful! STSD is now connected to your Spotify account.' });
+  } else {
+    res.status(500).json({ error: 'Authentication failed' });
+  }
 });
 
 // Placeholder for shuffle control endpoints
