@@ -10,9 +10,14 @@ This is STSD (Spotify True Shuffle Daemon). Read `DESIGN.md` for full project co
 ## Development Workflow
 
 ### Git Commits
-- **ALWAYS commit after atomic changes** - Don't let multiple features accumulate
+- **ALWAYS remind user to commit after atomic changes** - Don't let multiple features accumulate
 - Use descriptive commit messages that explain what was implemented
-- Remind the user to commit if they forget, or do it automatically
+- Remind the user when changes are ready to commit, but don't commit automatically
+
+### Documentation
+- **Keep documentation up-to-date** - Update DESIGN.md and steering docs when functionality, architecture, or workflow changes
+- Update API documentation when endpoints change
+- Reflect design decisions and lessons learned in DESIGN.md
 
 ### Implementation Approach
 - **Start small and atomic** - Implement one piece at a time
