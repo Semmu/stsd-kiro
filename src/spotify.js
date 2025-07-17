@@ -156,6 +156,27 @@ class SpotifyClient {
     }
   }
 
+  // Get current user info
+  async getCurrentUser() {
+    if (!this.isAuthenticated || !this.api) {
+      return null;
+    }
+    
+    try {
+      const user = await this.api.currentUser.profile();
+      return {
+        id: user.id,
+        display_name: user.display_name,
+        email: user.email,
+        country: user.country,
+        followers: user.followers?.total || 0
+      };
+    } catch (error) {
+      console.error('Failed to get current user:', error);
+      return null;
+    }
+  }
+
   // Check if user is authenticated
   isUserAuthenticated() {
     return this.isAuthenticated;

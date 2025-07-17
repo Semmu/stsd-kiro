@@ -13,12 +13,25 @@ app.get('/health', (req, res) => {
 });
 
 // API routes
-app.get('/api/status', (req, res) => {
-  res.json({
+app.get('/api/status', async (req, res) => {
+  const status = {
     message: 'STSD (Spotify True Shuffle Daemon) is running',
     version: '1.0.0',
     authenticated: spotifyClient.isUserAuthenticated()
-  });
+  };
+
+  if (spotifyClient.isUserAuthenticated()) {
+    try {
+      const user = await spotifyClient.getCurrentUser();
+      if (user) {
+        status.user = user;
+      }
+    } catch (error) {
+      console.error('Failed to get user info for status:', error);
+    }
+  }
+
+  res.json(status);
 });
 
 // Auth routes
