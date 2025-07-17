@@ -1,6 +1,7 @@
 const express = require('express');
 const spotifyClient = require('./spotify');
 const database = require('./database');
+const shuffleState = require('./shuffleState');
 require('dotenv').config();
 
 const app = express();
@@ -32,6 +33,9 @@ app.get('/api/status', async (req, res) => {
     }
   }
 
+  // Add shuffle state info
+  status.shuffle = shuffleState.getState();
+
   res.json(status);
 });
 
@@ -57,21 +61,85 @@ app.get('/auth/callback', async (req, res) => {
   }
 });
 
-// Placeholder for shuffle control endpoints
-app.post('/api/shuffle/start', (req, res) => {
-  // TODO: Implement shuffle start logic
-  res.json({ message: 'Shuffle started', contextId: req.body.contextId });
+// Shuffle control endpoints
+app.get('/api/shuffle/start/spotify::contextType::contextId', async (req, res) => {
+  try {
+    const { contextType, contextId } = req.params;
+    const contextUri = `spotify:${contextType}:${contextId}`;
+
+    if (!spotifyClient.isUserAuthenticated()) {
+      return res.status(401).json({ error: 'Not authenticated with Spotify' });
+    }
+
+    // Validate context type
+    if (!['playlist', 'album'].includes(contextType)) {
+      return res.status(400).json({ error: 'Invalid context type. Supported: playlist, album' });
+    }
+
+    console.log(`Starting shuffle for context: ${contextUri}`);
+
+    // Check if we're already managing this context (idempotency)
+    if (shuffleState.isManagingContext(contextUri)) {
+      console.log(`Already managing shuffle for context ${contextUri}`);
+      return res.json({
+        message: 'Already shuffling this context',
+        context: {
+          uri: contextUri,
+          type: contextType,
+          id: contextId,
+          alreadyActive: true
+        }
+      });
+    }
+
+    // Fetch all tracks from the context
+    const contextData = await spotifyClient.getContextTracks(contextUri);
+
+    console.log(`Fetched ${contextData.totalTracks} tracks from ${contextData.type}: ${contextData.id}`);
+
+    // Sync tracks with database (add new tracks, preserve existing play counts)
+    await database.syncContextTracks(contextUri, contextData.tracks);
+
+    // Start managing this context
+    shuffleState.startShuffle(contextUri, contextData.tracks);
+
+    res.json({
+      message: 'Shuffle started successfully',
+      context: {
+        uri: contextData.contextUri,
+        type: contextData.type,
+        id: contextData.id,
+        totalTracks: contextData.totalTracks,
+        alreadyActive: false
+      }
+    });
+
+  } catch (error) {
+    console.error('Failed to start shuffle:', error);
+    res.status(500).json({ error: 'Failed to start shuffle', details: error.message });
+  }
 });
 
-app.post('/api/shuffle/stop', (req, res) => {
-  // TODO: Implement shuffle stop logic
-  res.json({ message: 'Shuffle stopped' });
-});
+
 
 // Background shuffle check - runs every 30 seconds
-const shuffleCheckInterval = setInterval(() => {
-  console.log('Background shuffle check:', new Date().toISOString());
-  // TODO: Implement periodic shuffle logic
+const shuffleCheckInterval = setInterval(async () => {
+  if (!shuffleState.isActive || !spotifyClient.isUserAuthenticated()) {
+    return;
+  }
+
+  try {
+    const currentPlayback = await spotifyClient.getCurrentPlayback();
+    
+    if (shuffleState.shouldTakeControl(currentPlayback)) {
+      console.log('Taking control of playback for shuffle management');
+      // TODO: Implement queue management logic
+    } else {
+      console.log('Playback under our control, monitoring...');
+    }
+  } catch (error) {
+    console.error('Error during shuffle check:', error);
+  }
 }, 30000);
 
 // Initialize database and start server

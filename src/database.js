@@ -135,6 +135,58 @@ class Database {
         });
     }
 
+    // Sync context tracks with database (add new tracks, keep existing play counts)
+    async syncContextTracks(contextId, tracks) {
+        return new Promise((resolve, reject) => {
+            this.db.serialize(() => {
+                this.db.run('BEGIN TRANSACTION');
+
+                let completed = 0;
+                let errors = [];
+
+                const checkComplete = () => {
+                    completed++;
+                    if (completed === tracks.length) {
+                        if (errors.length > 0) {
+                            this.db.run('ROLLBACK');
+                            reject(new Error(`Failed to sync ${errors.length} tracks: ${errors[0]}`));
+                        } else {
+                            this.db.run('COMMIT', (err) => {
+                                if (err) {
+                                    reject(err);
+                                } else {
+                                    console.log(`Synced ${tracks.length} tracks for context ${contextId}`);
+                                    resolve(tracks.length);
+                                }
+                            });
+                        }
+                    }
+                };
+
+                if (tracks.length === 0) {
+                    this.db.run('COMMIT');
+                    resolve(0);
+                    return;
+                }
+
+                // Insert each track if it doesn't exist (preserving existing play counts)
+                tracks.forEach(track => {
+                    const sql = `
+            INSERT OR IGNORE INTO play_counts (context_id, track_id, play_count, last_played)
+            VALUES (?, ?, 0, NULL)
+          `;
+
+                    this.db.run(sql, [contextId, track.uri], function (err) {
+                        if (err) {
+                            errors.push(err.message);
+                        }
+                        checkComplete();
+                    });
+                });
+            });
+        });
+    }
+
     // Close database connection
     close() {
         if (this.db) {
