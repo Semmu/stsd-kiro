@@ -254,6 +254,61 @@ class SpotifyClient {
         }
     }
 
+    // Start playback with a context (playlist/album)
+    async startPlayback(contextUri, deviceId = null) {
+        if (!this.isAuthenticated || !this.api) {
+            throw new Error('Not authenticated with Spotify');
+        }
+
+        try {
+            const options = {
+                context_uri: contextUri
+            };
+
+            if (deviceId) {
+                options.device_id = deviceId;
+            }
+
+            await this.api.player.startResumePlayback(deviceId, undefined, undefined, options);
+            console.log(`Started playback for context: ${contextUri}`);
+            return true;
+        } catch (error) {
+            console.error('Failed to start playback:', error);
+            throw error;
+        }
+    }
+
+    // Add track to queue
+    async addToQueue(trackUri, deviceId = null) {
+        if (!this.isAuthenticated || !this.api) {
+            throw new Error('Not authenticated with Spotify');
+        }
+
+        try {
+            await this.api.player.addItemToPlaybackQueue(trackUri, deviceId);
+            console.log(`Added to queue: ${trackUri}`);
+            return true;
+        } catch (error) {
+            console.error('Failed to add track to queue:', error);
+            throw error;
+        }
+    }
+
+    // Get available devices
+    async getDevices() {
+        if (!this.isAuthenticated || !this.api) {
+            throw new Error('Not authenticated with Spotify');
+        }
+
+        try {
+            const devices = await this.api.player.getAvailableDevices();
+            return devices.devices;
+        } catch (error) {
+            console.error('Failed to get devices:', error);
+            return [];
+        }
+    }
+
     // Check if user is authenticated
     isUserAuthenticated() {
         return this.isAuthenticated;

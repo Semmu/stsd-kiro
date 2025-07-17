@@ -100,8 +100,31 @@ app.get('/api/shuffle/start/spotify::contextType::contextId', async (req, res) =
     // Sync tracks with database (add new tracks, preserve existing play counts)
     await database.syncContextTracks(contextUri, contextData.tracks);
 
+    // Start playback with the context to maintain UI feedback
+    await spotifyClient.startPlayback(contextUri);
+
     // Start managing this context
     shuffleState.startShuffle(contextUri, contextData.tracks);
+
+    // Immediately populate queue with least-played tracks
+    const playCountData = await database.getContextPlayCounts(contextUri);
+    
+    if (playCountData.length > 0) {
+      // Find tracks with minimum play count
+      const minPlayCount = playCountData[0].play_count;
+      const leastPlayedTracks = playCountData.filter(track => track.play_count === minPlayCount);
+      
+      // Randomly select from least-played tracks and add to queue
+      const tracksToQueue = Math.min(5, leastPlayedTracks.length); // Queue up to 5 tracks
+      
+      for (let i = 0; i < tracksToQueue; i++) {
+        const randomIndex = Math.floor(Math.random() * leastPlayedTracks.length);
+        const selectedTrack = leastPlayedTracks.splice(randomIndex, 1)[0];
+        
+        await spotifyClient.addToQueue(selectedTrack.track_id);
+        console.log(`Initially queued least-played track: ${selectedTrack.track_id} (played ${selectedTrack.play_count} times)`);
+      }
+    }
 
     res.json({
       message: 'Shuffle started successfully',
@@ -130,11 +153,47 @@ const shuffleCheckInterval = setInterval(async () => {
 
   try {
     const currentPlayback = await spotifyClient.getCurrentPlayback();
-    
+
     if (shuffleState.shouldTakeControl(currentPlayback)) {
       console.log('Taking control of playback for shuffle management');
-      // TODO: Implement queue management logic
-    } else {
+
+      // Get least-played tracks from database
+      const playCountData = await database.getContextPlayCounts(shuffleState.currentContext);
+
+      if (playCountData.length > 0) {
+        // Find tracks with minimum play count
+        const minPlayCount = playCountData[0].play_count;
+        const leastPlayedTracks = playCountData.filter(track => track.play_count === minPlayCount);
+
+        // Randomly select from least-played tracks and add to queue
+        const tracksToQueue = Math.min(5, leastPlayedTracks.length); // Queue up to 5 tracks
+
+        for (let i = 0; i < tracksToQueue; i++) {
+          const randomIndex = Math.floor(Math.random() * leastPlayedTracks.length);
+          const selectedTrack = leastPlayedTracks.splice(randomIndex, 1)[0];
+
+          await spotifyClient.addToQueue(selectedTrack.track_id);
+          console.log(`Queued least-played track: ${selectedTrack.track_id} (played ${selectedTrack.play_count} times)`);
+        }
+
+        shuffleState.setLastManagedTrack(currentPlayback?.item?.uri || null);
+      }
+
+    } else if (currentPlayback && currentPlayback.is_playing) {
+      // Check if current track finished and increment play count
+      const currentTrackUri = currentPlayback.item?.uri;
+      const progress = currentPlayback.progress_ms;
+      const duration = currentPlayback.item?.duration_ms;
+
+      // If track is near the end (within 10 seconds), increment play count
+      if (currentTrackUri && duration && progress && (duration - progress) < 10000) {
+        if (shuffleState.lastManagedTrack !== currentTrackUri) {
+          await database.incrementPlayCount(shuffleState.currentContext, currentTrackUri);
+          shuffleState.setLastManagedTrack(currentTrackUri);
+          console.log(`Incremented play count for: ${currentTrackUri}`);
+        }
+      }
+
       console.log('Playback under our control, monitoring...');
     }
   } catch (error) {
