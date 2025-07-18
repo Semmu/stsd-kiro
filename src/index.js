@@ -78,7 +78,7 @@ app.get('/api/shuffle/start/spotify::contextType::contextId', async (req, res) =
 
     console.log(`Starting shuffle for context: ${contextUri}`);
 
-    // Check if we're already managing this context (idempotency)
+    // Check if we're already managing this exact context (idempotency)
     if (shuffleState.isManagingContext(contextUri)) {
       console.log(`Already managing shuffle for context ${contextUri}`);
       return res.json({
@@ -100,8 +100,29 @@ app.get('/api/shuffle/start/spotify::contextType::contextId', async (req, res) =
     // Sync tracks with database (add new tracks, preserve existing play counts)
     await database.syncContextTracks(contextUri, contextData.tracks);
 
-    // Start playback with the context to maintain UI feedback
-    await spotifyClient.startPlayback(contextUri);
+    // Handle context switching vs regular startup
+    let playbackStarted = false;
+
+    if (shuffleState.isActive && shuffleState.currentContext !== contextUri) {
+      // We're switching to a different context
+      console.log(`Switching from ${shuffleState.currentContext} to ${contextUri}`);
+      console.log('Forcing context switch with pause/resume...');
+
+      playbackStarted = await spotifyClient.forceContextSwitch(contextUri);
+      if (!playbackStarted) {
+        console.error('Failed to force context switch');
+        return res.status(500).json({ error: 'Failed to switch to new context' });
+      }
+    } else {
+      // Regular startup (first time or no active context)
+      console.log('Starting playback for new context...');
+      playbackStarted = await spotifyClient.startPlayback(contextUri);
+
+      if (!playbackStarted) {
+        console.error('Failed to start playback');
+        return res.status(500).json({ error: 'Failed to start playback for context' });
+      }
+    }
 
     // Start managing this context
     shuffleState.startShuffle(contextUri, contextData.tracks);

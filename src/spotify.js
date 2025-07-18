@@ -416,6 +416,67 @@ class SpotifyClient {
         }
     }
 
+    // Force context switch by starting new context with offset (should clear queue)
+    async forceContextSwitch(contextUri, deviceId = null) {
+        if (!this.isAuthenticated || !this.api) {
+            throw new Error('Not authenticated with Spotify');
+        }
+
+        try {
+            await this.ensureValidToken();
+            
+            console.log('Forcing context switch with offset to clear queue...');
+            
+            // Get devices first
+            const devices = await this.getDevices();
+            if (devices.length === 0) {
+                console.log('No active devices found');
+                return false;
+            }
+
+            // Use active device if no specific device provided
+            if (!deviceId) {
+                const activeDevice = devices.find(d => d.is_active);
+                if (activeDevice) {
+                    deviceId = activeDevice.id;
+                } else {
+                    deviceId = devices[0].id;
+                }
+            }
+
+            // Use direct HTTP API with offset to force context switch and clear queue
+            const url = `https://api.spotify.com/v1/me/player/play?device_id=${deviceId}`;
+            
+            const playbackOptions = {
+                context_uri: contextUri,
+                offset: { position: 0 } // Start from first track - this should clear queue
+            };
+            
+            console.log(`Force switching to context: ${contextUri} with offset`);
+            
+            const response = await fetch(url, {
+                method: 'PUT',
+                headers: {
+                    'Authorization': `Bearer ${this.accessToken}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(playbackOptions)
+            });
+            
+            if (!response.ok) {
+                const errorText = await response.text();
+                throw new Error(`HTTP ${response.status}: ${errorText}`);
+            }
+            
+            console.log('Context switch with offset successful');
+            return true;
+            
+        } catch (error) {
+            console.error('Failed to force context switch:', error);
+            throw error;
+        }
+    }
+
     // Check if user is authenticated
     isUserAuthenticated() {
         return this.isAuthenticated;
