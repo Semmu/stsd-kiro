@@ -711,6 +711,86 @@ class SpotifyClient {
         }
     }
 
+    // Get tracks from a specific playlist
+    async getPlaylistTracks(playlistId) {
+        if (!this.isAuthenticated || !this.api) {
+            throw new Error('Not authenticated with Spotify');
+        }
+
+        try {
+            await this.ensureValidToken();
+            
+            let tracks = [];
+            let offset = 0;
+            const limit = 50;
+
+            while (true) {
+                const response = await this.api.playlists.getPlaylistItems(playlistId, 'US', undefined, limit, offset);
+
+                // Filter out non-track items and null tracks
+                const validTracks = response.items
+                    .filter(item => item.track && item.track.type === 'track')
+                    .map(item => ({
+                        id: item.track.id,
+                        uri: item.track.uri,
+                        name: item.track.name,
+                        artists: item.track.artists.map(a => a.name).join(', '),
+                        duration_ms: item.track.duration_ms
+                    }));
+
+                tracks.push(...validTracks);
+
+                if (response.items.length < limit) break;
+                offset += limit;
+            }
+
+            return tracks;
+        } catch (error) {
+            console.error('Failed to get playlist tracks:', error);
+            throw error;
+        }
+    }
+
+    // Remove tracks from a playlist
+    async removeFromPlaylist(playlistId, trackUris) {
+        if (!this.isAuthenticated || !this.api) {
+            throw new Error('Not authenticated with Spotify');
+        }
+
+        try {
+            await this.ensureValidToken();
+
+            await this.api.playlists.removeItemsFromPlaylist(playlistId, {
+                tracks: trackUris
+            });
+
+            console.log(`Removed ${trackUris.length} tracks from playlist ${playlistId}`);
+            return true;
+        } catch (error) {
+            console.error('Failed to remove tracks from playlist:', error);
+            throw error;
+        }
+    }
+
+    // Add tracks to a playlist
+    async addToPlaylist(playlistId, trackUris) {
+        if (!this.isAuthenticated || !this.api) {
+            throw new Error('Not authenticated with Spotify');
+        }
+
+        try {
+            await this.ensureValidToken();
+
+            await this.api.playlists.addItemsToPlaylist(playlistId, trackUris);
+
+            console.log(`Added ${trackUris.length} tracks to playlist ${playlistId}`);
+            return true;
+        } catch (error) {
+            console.error('Failed to add tracks to playlist:', error);
+            throw error;
+        }
+    }
+
     // Check if user is authenticated
     isUserAuthenticated() {
         return this.isAuthenticated;

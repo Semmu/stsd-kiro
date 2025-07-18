@@ -118,6 +118,11 @@ app.get('/api/shuffle/start/spotify::contextType::contextId', async (req, res) =
     console.log('Pausing playback before playlist modification...');
     await spotifyClient.pausePlayback();
 
+    // Ensure STSD playlist exists and get its ID
+    console.log('Ensuring STSD playlist exists...');
+    const stsdPlaylistId = await spotifyClient.ensureSTSDPlaylist();
+    shuffleState.setStsdPlaylistId(stsdPlaylistId);
+    
     // Clear STSD playlist and populate with random tracks
     console.log('Clearing STSD playlist...');
     await spotifyClient.clearSTSDPlaylist();
@@ -225,53 +230,99 @@ app.get('/api/shuffle/start/spotify::contextType::contextId', async (req, res) =
 
 
 
-// Background shuffle check - runs every 30 seconds
-const shuffleCheckInterval = setInterval(async () => {
+// Background playlist management - runs every 15 seconds
+const playlistManagementInterval = setInterval(async () => {
   if (!shuffleState.isActive || !spotifyClient.isUserAuthenticated()) {
     return;
   }
 
   try {
     const currentPlayback = await spotifyClient.getCurrentPlayback();
+    
+    // Only manage if we're playing from our STSD playlist
+    if (!currentPlayback?.context?.uri?.includes('stsd-shuffle')) {
+      return;
+    }
 
-    if (shuffleState.shouldTakeControl(currentPlayback)) {
-      console.log('Taking control of playback for shuffle management (DISABLED - using playlist approach)');
+    console.log('Managing STSD playlist...');
+    
+    // Get current STSD playlist
+    const stsdPlaylistId = shuffleState.getStsdPlaylistId();
+    if (!stsdPlaylistId) {
+      console.log('No STSD playlist ID stored, skipping management');
+      return;
+    }
+
+    // Get current playlist tracks
+    const playlistTracks = await spotifyClient.getPlaylistTracks(stsdPlaylistId);
+    console.log(`Current STSD playlist has ${playlistTracks.length} tracks`);
+
+    // Check if current track has been played/skipped
+    const currentTrackUri = currentPlayback?.item?.uri;
+    const currentTrackIndex = playlistTracks.findIndex(track => track.uri === currentTrackUri);
+    
+    // Remove tracks that have been played (tracks before current position)
+    const tracksToRemove = [];
+    for (let i = 0; i < currentTrackIndex; i++) {
+      tracksToRemove.push(playlistTracks[i]);
+    }
+
+    if (tracksToRemove.length > 0) {
+      console.log(`Removing ${tracksToRemove.length} played/skipped tracks from STSD playlist`);
+      
+      // Remove tracks from playlist
+      const trackUrisToRemove = tracksToRemove.map(track => ({ uri: track.uri }));
+      await spotifyClient.removeFromPlaylist(stsdPlaylistId, trackUrisToRemove);
+      
+      // Update play counts in database
+      for (const track of tracksToRemove) {
+        await database.incrementPlayCount(shuffleState.currentContext, track.uri);
+        console.log(`Updated play count for: ${track.name} by ${track.artists}`);
+      }
+    }
+
+    // Get updated playlist length after removals
+    const updatedPlaylistTracks = await spotifyClient.getPlaylistTracks(stsdPlaylistId);
+    const remainingTracks = updatedPlaylistTracks.length;
+    console.log(`STSD playlist now has ${remainingTracks} tracks`);
+
+    // Add new tracks if we have fewer than 5
+    if (remainingTracks < 5) {
+      const tracksNeeded = 5 - remainingTracks;
+      console.log(`Need to add ${tracksNeeded} more tracks to maintain 5 tracks`);
 
       // Get least-played tracks from database
       const playCountData = await database.getContextPlayCounts(shuffleState.currentContext);
-
+      
       if (playCountData.length > 0) {
-        // Find tracks with minimum play count
-        const minPlayCount = playCountData[0].play_count;
-        const leastPlayedTracks = playCountData.filter(track => track.play_count === minPlayCount);
-
-        // Randomly select from least-played tracks and add to queue
-        const tracksToQueue = Math.min(5, leastPlayedTracks.length); // Queue up to 5 tracks
-
-        for (let i = 0; i < tracksToQueue; i++) {
-          const randomIndex = Math.floor(Math.random() * leastPlayedTracks.length);
-          const selectedTrack = leastPlayedTracks.splice(randomIndex, 1)[0];
-
-          // await spotifyClient.addToQueue(selectedTrack.track_id); // DISABLED - using playlist approach
-          // await database.incrementPlayCount(shuffleState.currentContext, selectedTrack.track_id); // DISABLED
-          // console.log(`Queued least-played track: ${selectedTrack.track_id} (played ${selectedTrack.play_count} times, now ${selectedTrack.play_count + 1})`); // DISABLED
-
-          // Add 1 second delay between queue additions to avoid API rate limiting
-          if (i < tracksToQueue - 1) {
-            await new Promise(resolve => setTimeout(resolve, 1000));
-          }
+        // Take the first tracks (already sorted by play count ascending)
+        const tracksToSelect = Math.min(tracksNeeded, playCountData.length);
+        const selectedTracks = playCountData.slice(0, tracksToSelect);
+        
+        // Shuffle the selected tracks
+        for (let i = selectedTracks.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [selectedTracks[i], selectedTracks[j]] = [selectedTracks[j], selectedTracks[i]];
         }
 
-        shuffleState.setLastManagedTrack(currentPlayback?.item?.uri || null);
+        // Add tracks to playlist
+        const trackUrisToAdd = selectedTracks.map(track => track.track_id);
+        await spotifyClient.addToPlaylist(stsdPlaylistId, trackUrisToAdd);
+        
+        console.log(`Added ${trackUrisToAdd.length} new tracks to STSD playlist`);
+        for (const selectedTrack of selectedTracks) {
+          const fullTrackInfo = shuffleState.getAllTracks().find(track => track.uri === selectedTrack.track_id);
+          if (fullTrackInfo) {
+            console.log(`Added: ${fullTrackInfo.name} by ${fullTrackInfo.artists} (played ${selectedTrack.play_count} times)`);
+          }
+        }
       }
-
-    } else {
-      // console.log('Playback under our control, monitoring...'); // DISABLED - too verbose
     }
+
   } catch (error) {
-    console.error('Error during shuffle check:', error);
+    console.error('Error during playlist management:', error);
   }
-}, 30000);
+}, 15000);
 
 // Initialize database and start server
 database.initialize()

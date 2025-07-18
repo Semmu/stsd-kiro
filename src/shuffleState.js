@@ -5,6 +5,7 @@ class ShuffleState {
     this.currentTracks = [];
     this.lastManagedTrack = null;
     this.lastCheckTime = null;
+    this.stsdPlaylistId = null;
   }
 
   // Start managing a context
@@ -65,6 +66,32 @@ class ShuffleState {
     }
 
     return false;
+  }
+
+  // Store STSD playlist ID
+  setStsdPlaylistId(playlistId) {
+    this.stsdPlaylistId = playlistId;
+  }
+
+  // Get STSD playlist ID
+  getStsdPlaylistId() {
+    return this.stsdPlaylistId;
+  }
+
+  // Get all tracks from current context
+  getAllTracks() {
+    return this.currentTracks;
+  }
+
+  // Stop shuffle management
+  stopShuffle() {
+    this.isActive = false;
+    this.currentContext = null;
+    this.currentTracks = [];
+    this.lastManagedTrack = null;
+    this.lastCheckTime = null;
+    this.stsdPlaylistId = null;
+    console.log('Stopped shuffle management');
   }
 }
 
