@@ -169,48 +169,51 @@ app.get('/api/shuffle/start/spotify::contextType::contextId', async (req, res) =
     const stsdPlaylistId = await spotifyClient.ensureSTSDPlaylist();
     shuffleState.setStsdPlaylistId(stsdPlaylistId);
 
-    // Clear STSD playlist and populate with random tracks
+    // Clear STSD playlist to start fresh
     console.log('Clearing STSD playlist...');
     await spotifyClient.clearSTSDPlaylist();
 
-    // Add least-played tracks atomically (one at a time for true least-played selection)
-    const targetTrackCount = PLAYLIST_TARGET_SIZE;
-    let addedCount = 0;
-
-    console.log(`Adding ${targetTrackCount} least-played tracks atomically...`);
-
-    for (let i = 0; i < targetTrackCount; i++) {
-      const success = await addOneLeastPlayedTrack(contextUri, contextData.tracks);
-
-      if (success) {
-        addedCount++;
-        console.log(`Progress: ${addedCount}/${targetTrackCount} tracks added`);
-
-        // Add 1 second delay between track additions
-        if (i < targetTrackCount - 1) {
-          await new Promise(resolve => setTimeout(resolve, 1000));
-        }
-      } else {
-        console.log(`Failed to add track ${i + 1}, stopping`);
-        break;
-      }
+    // Add first track and immediately start playback to establish proper context
+    console.log('Adding first track and starting playback...');
+    const firstTrackSuccess = await addOneLeastPlayedTrack(contextUri, contextData.tracks);
+    
+    if (!firstTrackSuccess) {
+      console.error('Failed to add first track');
+      return res.status(500).json({ error: 'Failed to add first track to STSD playlist' });
     }
 
-    console.log(`Successfully added ${addedCount} tracks to STSD playlist`)
-
-    // Wait before starting playback to ensure playlist is fully populated
-    console.log('Waiting for playlist to be fully populated...');
-    await new Promise(resolve => setTimeout(resolve, 2000));
-
-    // Start playing the STSD playlist instead of original context
-    const stsdPlaylistUri = `spotify:playlist:${spotifyClient.stsdPlaylistId}`;
-    console.log('Starting playback of STSD playlist with shuffle disabled...');
+    // Start playing the STSD playlist immediately after first track to establish context
+    const stsdPlaylistUri = `spotify:playlist:${stsdPlaylistId}`;
+    console.log('Starting playback of STSD playlist with first track...');
     const playbackStarted = await spotifyClient.startPlaybackWithShuffle(stsdPlaylistUri, null, false);
 
     if (!playbackStarted) {
       console.error('Failed to start STSD playlist playback');
       return res.status(500).json({ error: 'Failed to start STSD playlist playback' });
     }
+
+    console.log('Playback started successfully, now adding remaining tracks...');
+
+    // Add remaining tracks with delays
+    const remainingTracks = PLAYLIST_TARGET_SIZE - 1;
+    let addedCount = 1; // Already added first track
+    
+    for (let i = 0; i < remainingTracks; i++) {
+      // Add delay before each additional track
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      
+      const success = await addOneLeastPlayedTrack(contextUri, contextData.tracks);
+      
+      if (success) {
+        addedCount++;
+        console.log(`Progress: ${addedCount}/${PLAYLIST_TARGET_SIZE} tracks added`);
+      } else {
+        console.log(`Failed to add track ${i + 2}, stopping`);
+        break;
+      }
+    }
+    
+    console.log(`Successfully added ${addedCount} tracks to STSD playlist with proper playback order`);
 
     // Start managing this context
     shuffleState.startShuffle(contextUri, contextData.tracks);
