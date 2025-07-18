@@ -130,22 +130,20 @@ app.get('/api/shuffle/start/spotify::contextType::contextId', async (req, res) =
     console.log(`DEBUG: Play count data:`, playCountData.map(t => `${t.track_id.split(':')[2]} (${t.play_count} plays)`));
 
     if (playCountData.length > 0) {
-      // Find tracks with minimum play count
-      const minPlayCount = playCountData[0].play_count;
-      console.log(`DEBUG: Minimum play count is: ${minPlayCount}`);
+      // Take the first 5 tracks (already sorted by play count ascending)
+      const tracksToSelect = Math.min(5, playCountData.length);
+      const selectedTracks = playCountData.slice(0, tracksToSelect);
       
-      const candidateTracks = playCountData.filter(track => track.play_count === minPlayCount);
-      console.log(`DEBUG: Found ${candidateTracks.length} tracks with minimum play count of ${minPlayCount}`);
-
-      // Randomly select from least-played tracks (to avoid always picking the same order)
-      const tracksToSelect = Math.min(5, candidateTracks.length);
-      console.log(`DEBUG: Will select ${tracksToSelect} tracks from ${candidateTracks.length} candidates`);
+      console.log(`DEBUG: Selected first ${tracksToSelect} tracks from sorted list (play counts: ${selectedTracks.map(t => t.play_count).join(', ')})`);
       
-      for (let i = 0; i < tracksToSelect; i++) {
-        const randomIndex = Math.floor(Math.random() * candidateTracks.length);
-        const selectedTrack = candidateTracks.splice(randomIndex, 1)[0];
-        console.log(`DEBUG: Selected track ${i + 1}: ${selectedTrack.track_id} (${selectedTrack.play_count} plays)`);
-
+      // Shuffle the selected tracks to avoid predictable order
+      for (let i = selectedTracks.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [selectedTracks[i], selectedTracks[j]] = [selectedTracks[j], selectedTracks[i]];
+      }
+      
+      // Process the shuffled selection
+      for (const selectedTrack of selectedTracks) {
         // Find the full track info from contextData
         const fullTrackInfo = contextData.tracks.find(track => track.uri === selectedTrack.track_id);
         if (fullTrackInfo) {
@@ -155,7 +153,7 @@ app.get('/api/shuffle/start/spotify::contextType::contextId', async (req, res) =
             name: fullTrackInfo.name,
             artists: fullTrackInfo.artists
           });
-          console.log(`Selected least-played track: ${fullTrackInfo.name} by ${fullTrackInfo.artists} (played ${selectedTrack.play_count} times)`);
+          console.log(`Selected track: ${fullTrackInfo.name} by ${fullTrackInfo.artists} (played ${selectedTrack.play_count} times)`);
         } else {
           console.log(`DEBUG: WARNING - Could not find full track info for ${selectedTrack.track_id}`);
         }
