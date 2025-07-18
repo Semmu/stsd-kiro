@@ -108,22 +108,27 @@ app.get('/api/shuffle/start/spotify::contextType::contextId', async (req, res) =
 
     // Immediately populate queue with least-played tracks
     const playCountData = await database.getContextPlayCounts(contextUri);
-    
+
     if (playCountData.length > 0) {
       // Find tracks with minimum play count
       const minPlayCount = playCountData[0].play_count;
       const leastPlayedTracks = playCountData.filter(track => track.play_count === minPlayCount);
-      
+
       // Randomly select from least-played tracks and add to queue
       const tracksToQueue = Math.min(5, leastPlayedTracks.length); // Queue up to 5 tracks
-      
+
       for (let i = 0; i < tracksToQueue; i++) {
         const randomIndex = Math.floor(Math.random() * leastPlayedTracks.length);
         const selectedTrack = leastPlayedTracks.splice(randomIndex, 1)[0];
-        
+
         await spotifyClient.addToQueue(selectedTrack.track_id);
         await database.incrementPlayCount(contextUri, selectedTrack.track_id);
         console.log(`Initially queued least-played track: ${selectedTrack.track_id} (played ${selectedTrack.play_count} times, now ${selectedTrack.play_count + 1})`);
+
+        // Add 1 second delay between queue additions to avoid API rate limiting
+        if (i < tracksToQueue - 1) {
+          await new Promise(resolve => setTimeout(resolve, 1000));
+        }
       }
     }
 
@@ -176,6 +181,11 @@ const shuffleCheckInterval = setInterval(async () => {
           await spotifyClient.addToQueue(selectedTrack.track_id);
           await database.incrementPlayCount(shuffleState.currentContext, selectedTrack.track_id);
           console.log(`Queued least-played track: ${selectedTrack.track_id} (played ${selectedTrack.play_count} times, now ${selectedTrack.play_count + 1})`);
+
+          // Add 1 second delay between queue additions to avoid API rate limiting
+          if (i < tracksToQueue - 1) {
+            await new Promise(resolve => setTimeout(resolve, 1000));
+          }
         }
 
         shuffleState.setLastManagedTrack(currentPlayback?.item?.uri || null);
