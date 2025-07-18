@@ -100,6 +100,10 @@ app.get('/api/shuffle/start/spotify::contextType::contextId', async (req, res) =
     // Sync tracks with database (add new tracks, preserve existing play counts)
     await database.syncContextTracks(contextUri, contextData.tracks);
 
+    // Pause playback before modifying playlist to prevent auto-play during updates
+    console.log('Pausing playback before playlist modification...');
+    await spotifyClient.pausePlayback();
+    
     // Clear STSD playlist and populate with random tracks
     console.log('Clearing STSD playlist...');
     await spotifyClient.clearSTSDPlaylist();
@@ -115,15 +119,27 @@ app.get('/api/shuffle/start/spotify::contextType::contextId', async (req, res) =
       console.log(`Selected random track: ${selectedTrack.name} by ${selectedTrack.artists}`);
     }
 
-    // Add random tracks to STSD playlist
+    // Add random tracks to STSD playlist with delays
     if (randomTracks.length > 0) {
-      await spotifyClient.addTracksToSTSDPlaylist(randomTracks);
+      for (let i = 0; i < randomTracks.length; i++) {
+        await spotifyClient.addTracksToSTSDPlaylist([randomTracks[i]]);
+        console.log(`Added track ${i + 1}/${randomTracks.length} to STSD playlist`);
+
+        // Add 1 second delay between track additions
+        if (i < randomTracks.length - 1) {
+          await new Promise(resolve => setTimeout(resolve, 1000));
+        }
+      }
     }
+
+    // Wait before starting playback to ensure playlist is fully populated
+    console.log('Waiting for playlist to be fully populated...');
+    await new Promise(resolve => setTimeout(resolve, 2000));
 
     // Start playing the STSD playlist instead of original context
     const stsdPlaylistUri = `spotify:playlist:${spotifyClient.stsdPlaylistId}`;
-    console.log('Starting playback of STSD playlist...');
-    const playbackStarted = await spotifyClient.startPlayback(stsdPlaylistUri);
+    console.log('Starting playback of STSD playlist with shuffle disabled...');
+    const playbackStarted = await spotifyClient.startPlaybackWithShuffle(stsdPlaylistUri, null, false);
 
     if (!playbackStarted) {
       console.error('Failed to start STSD playlist playback');

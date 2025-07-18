@@ -555,25 +555,25 @@ class SpotifyClient {
 
         try {
             await this.ensureValidToken();
-            
+
             // Get current tracks in the playlist
             const playlist = await this.api.playlists.getPlaylist(this.stsdPlaylistId);
-            
+
             if (playlist.tracks.items.length === 0) {
                 console.log('STSD playlist is already empty');
                 return true;
             }
-            
+
             // Remove all tracks from playlist
             const trackUris = playlist.tracks.items.map(item => ({ uri: item.track.uri }));
-            
+
             await this.api.playlists.removeItemsFromPlaylist(this.stsdPlaylistId, {
                 tracks: trackUris
             });
-            
+
             console.log(`Cleared ${trackUris.length} tracks from STSD playlist`);
             return true;
-            
+
         } catch (error) {
             console.error('Failed to clear STSD playlist:', error);
             throw error;
@@ -588,15 +588,126 @@ class SpotifyClient {
 
         try {
             await this.ensureValidToken();
-            
+
             await this.api.playlists.addItemsToPlaylist(this.stsdPlaylistId, trackUris);
-            
+
             console.log(`Added ${trackUris.length} tracks to STSD playlist`);
             return true;
-            
+
         } catch (error) {
             console.error('Failed to add tracks to STSD playlist:', error);
             throw error;
+        }
+    }
+
+    // Start playback with shuffle control
+    async startPlaybackWithShuffle(contextUri, deviceId = null, shuffle = false) {
+        if (!this.isAuthenticated || !this.api) {
+            throw new Error('Not authenticated with Spotify');
+        }
+
+        try {
+            await this.ensureValidToken();
+
+            // Get devices first
+            const devices = await this.getDevices();
+            if (devices.length === 0) {
+                console.log('No active devices found');
+                return false;
+            }
+
+            // Use active device if no specific device provided
+            if (!deviceId) {
+                const activeDevice = devices.find(d => d.is_active);
+                if (activeDevice) {
+                    deviceId = activeDevice.id;
+                } else {
+                    deviceId = devices[0].id;
+                }
+            }
+
+            // Start playback with shuffle setting
+            const url = `https://api.spotify.com/v1/me/player/play?device_id=${deviceId}`;
+
+            const playbackOptions = {
+                context_uri: contextUri,
+                offset: { position: 0 }
+            };
+
+            console.log(`Starting playback: ${contextUri}, shuffle: ${shuffle}`);
+
+            const response = await fetch(url, {
+                method: 'PUT',
+                headers: {
+                    'Authorization': `Bearer ${this.accessToken}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(playbackOptions)
+            });
+
+            if (!response.ok) {
+                const errorText = await response.text();
+                throw new Error(`HTTP ${response.status}: ${errorText}`);
+            }
+
+            // Set shuffle state after starting playback
+            await new Promise(resolve => setTimeout(resolve, 1000)); // Wait for playback to start
+
+            const shuffleUrl = `https://api.spotify.com/v1/me/player/shuffle?state=${shuffle}&device_id=${deviceId}`;
+
+            const shuffleResponse = await fetch(shuffleUrl, {
+                method: 'PUT',
+                headers: {
+                    'Authorization': `Bearer ${this.accessToken}`
+                }
+            });
+
+            if (!shuffleResponse.ok) {
+                console.warn('Failed to set shuffle state, but playback started successfully');
+            } else {
+                console.log(`Shuffle set to: ${shuffle}`);
+            }
+
+            return true;
+
+        } catch (error) {
+            console.error('Failed to start playback with shuffle:', error);
+            throw error;
+        }
+    }
+
+    // Pause current playback
+    async pausePlayback(deviceId = null) {
+        if (!this.isAuthenticated || !this.api) {
+            throw new Error('Not authenticated with Spotify');
+        }
+
+        try {
+            await this.ensureValidToken();
+
+            // Use direct HTTP API to avoid SDK JSON parsing issues
+            const url = deviceId
+                ? `https://api.spotify.com/v1/me/player/pause?device_id=${deviceId}`
+                : 'https://api.spotify.com/v1/me/player/pause';
+
+            const response = await fetch(url, {
+                method: 'PUT',
+                headers: {
+                    'Authorization': `Bearer ${this.accessToken}`
+                }
+            });
+
+            if (response.ok || response.status === 204) {
+                console.log('Playback paused');
+                return true;
+            } else {
+                console.log('Pause request sent (may not have been playing)');
+                return true; // Don't treat as error
+            }
+        } catch (error) {
+            console.error('Failed to pause playback:', error);
+            // Don't throw error - pausing might fail if nothing is playing
+            return false;
         }
     }
 
