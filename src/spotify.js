@@ -38,18 +38,7 @@ class SpotifyClient {
                     console.log('Loaded existing Spotify tokens (expired - will refresh automatically)');
                 }
 
-                // Ensure STSD playlist exists for already authenticated users
-                try {
-                    await this.ensureSTSDPlaylist();
-                } catch (error) {
-                    if (error.message.includes('Insufficient client scope')) {
-                        console.log('⚠️  STSD needs additional permissions to create playlists.');
-                        console.log('   Please re-authenticate by visiting: http://127.0.0.1:3000/auth/login');
-                        this.needsReauth = true;
-                    } else {
-                        console.error('Failed to ensure STSD playlist on startup:', error);
-                    }
-                }
+
             }
         } catch (error) {
             console.log('No existing tokens found, authentication required');
@@ -212,13 +201,7 @@ class SpotifyClient {
 
                 console.log('Spotify user authentication successful');
 
-                // Create/find the dedicated STSD playlist
-                try {
-                    await this.ensureSTSDPlaylist();
-                } catch (error) {
-                    console.error('Failed to create STSD playlist during authentication:', error);
-                    // Don't fail authentication if playlist creation fails
-                }
+
 
                 return true;
             }
@@ -501,104 +484,7 @@ class SpotifyClient {
         }
     }
 
-    // Find or create the dedicated STSD playlist
-    async ensureSTSDPlaylist() {
-        if (!this.isAuthenticated || !this.api) {
-            throw new Error('Not authenticated with Spotify');
-        }
 
-        try {
-            await this.ensureValidToken();
-
-            const playlistName = 'STSD Shuffle';
-            const playlistDescription = 'Managed by Spotify True Shuffle Daemon - Do not modify manually';
-
-            // Get current user to create playlist
-            const user = await this.api.currentUser.profile();
-
-            // Search for existing STSD playlist
-            const playlists = await this.api.playlists.getUsersPlaylists(user.id, 50);
-
-            let stsdPlaylist = playlists.items.find(playlist =>
-                playlist.name === playlistName && playlist.owner.id === user.id
-            );
-
-            if (stsdPlaylist) {
-                console.log(`Found existing STSD playlist: ${stsdPlaylist.id}`);
-                this.stsdPlaylistId = stsdPlaylist.id;
-                return stsdPlaylist.id;
-            }
-
-            // Create new STSD playlist
-            console.log('Creating new STSD playlist...');
-            const newPlaylist = await this.api.playlists.createPlaylist(user.id, {
-                name: playlistName,
-                description: playlistDescription,
-                public: false
-            });
-
-            console.log(`Created STSD playlist: ${newPlaylist.id}`);
-            this.stsdPlaylistId = newPlaylist.id;
-            return newPlaylist.id;
-
-        } catch (error) {
-            console.error('Failed to ensure STSD playlist:', error);
-            throw error;
-        }
-    }
-
-    // Clear all tracks from STSD playlist
-    async clearSTSDPlaylist() {
-        if (!this.stsdPlaylistId) {
-            throw new Error('STSD playlist not initialized');
-        }
-
-        try {
-            await this.ensureValidToken();
-
-            // Get current tracks in the playlist
-            const playlist = await this.api.playlists.getPlaylist(this.stsdPlaylistId);
-
-            if (playlist.tracks.items.length === 0) {
-                console.log('STSD playlist is already empty');
-                return true;
-            }
-
-            // Remove all tracks from playlist
-            const trackUris = playlist.tracks.items.map(item => ({ uri: item.track.uri }));
-
-            await this.api.playlists.removeItemsFromPlaylist(this.stsdPlaylistId, {
-                tracks: trackUris
-            });
-
-            console.log(`Cleared ${trackUris.length} tracks from STSD playlist`);
-            return true;
-
-        } catch (error) {
-            console.error('Failed to clear STSD playlist:', error);
-            throw error;
-        }
-    }
-
-    // Add tracks to STSD playlist
-    async addTracksToSTSDPlaylist(trackUris) {
-        if (!this.stsdPlaylistId) {
-            throw new Error('STSD playlist not initialized');
-        }
-
-        try {
-            await this.ensureValidToken();
-
-            await this.api.playlists.addItemsToPlaylist(this.stsdPlaylistId, trackUris);
-
-            console.log(`Added ${trackUris.length} tracks to STSD playlist`);
-            return true;
-
-        } catch (error) {
-            console.error('Failed to add tracks to STSD playlist:', error);
-            throw error;
-        }
-    }
 
     // Start playback with shuffle control and optional track offset
     async startPlaybackWithShuffle(contextUri, deviceId = null, shuffle = false, trackUri = null) {
@@ -719,7 +605,7 @@ class SpotifyClient {
 
         try {
             await this.ensureValidToken();
-            
+
             let tracks = [];
             let offset = 0;
             const limit = 50;
@@ -791,6 +677,68 @@ class SpotifyClient {
         }
     }
 
+    // Remove all existing [STSD] playlists
+    async removeAllSTSDPlaylists() {
+        if (!this.isAuthenticated || !this.api) {
+            throw new Error('Not authenticated with Spotify');
+        }
+
+        try {
+            await this.ensureValidToken();
+
+            // Get current user
+            const user = await this.api.currentUser.profile();
+
+            // Get all user playlists
+            let allPlaylists = [];
+            let offset = 0;
+            const limit = 50;
+
+            while (true) {
+                const response = await this.api.playlists.getUsersPlaylists(user.id, limit, offset);
+                allPlaylists.push(...response.items);
+
+                if (response.items.length < limit) break;
+                offset += limit;
+            }
+
+            // Find playlists that start with [STSD]
+            const stsdPlaylists = allPlaylists.filter(playlist =>
+                playlist.name.startsWith('[STSD]') && playlist.owner.id === user.id
+            );
+
+            console.log(`Found ${stsdPlaylists.length} existing [STSD] playlists to remove`);
+
+            // Remove each STSD playlist
+            for (const playlist of stsdPlaylists) {
+                try {
+                    // For owned playlists, we need to unfollow them (which effectively deletes them for the owner)
+                    const url = `https://api.spotify.com/v1/playlists/${playlist.id}/followers`;
+                    const response = await fetch(url, {
+                        method: 'DELETE',
+                        headers: {
+                            'Authorization': `Bearer ${this.accessToken}`
+                        }
+                    });
+
+                    if (response.ok || response.status === 200) {
+                        console.log(`Removed [STSD] playlist: ${playlist.name} (${playlist.id})`);
+                    } else {
+                        console.error(`Failed to remove playlist ${playlist.id}: HTTP ${response.status}`);
+                    }
+                } catch (error) {
+                    console.error(`Failed to remove playlist ${playlist.id}:`, error);
+                }
+            }
+
+            return stsdPlaylists.length;
+
+        } catch (error) {
+            console.error('Failed to remove [STSD] playlists:', error);
+            throw error;
+        }
+    }
+
     // Create a new fresh STSD playlist for each shuffle session
     async createFreshSTSDPlaylist(originalContextName) {
         if (!this.isAuthenticated || !this.api) {
@@ -799,6 +747,9 @@ class SpotifyClient {
 
         try {
             await this.ensureValidToken();
+
+            // First, remove all existing [STSD] playlists
+            await this.removeAllSTSDPlaylists();
 
             // Create playlist name with original context
             const playlistName = `[STSD] ${originalContextName}`;
