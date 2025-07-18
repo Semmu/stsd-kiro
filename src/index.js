@@ -103,30 +103,63 @@ app.get('/api/shuffle/start/spotify::contextType::contextId', async (req, res) =
     // Pause playback before modifying playlist to prevent auto-play during updates
     console.log('Pausing playback before playlist modification...');
     await spotifyClient.pausePlayback();
-    
+
     // Clear STSD playlist and populate with random tracks
     console.log('Clearing STSD playlist...');
     await spotifyClient.clearSTSDPlaylist();
 
-    // Select 5 random tracks from the context
-    const randomTracks = [];
-    const availableTracks = [...contextData.tracks]; // Copy array to avoid modifying original
+    // Select 5 least-played tracks from the context
+    const playCountData = await database.getContextPlayCounts(contextUri);
+    const leastPlayedTracks = [];
 
-    for (let i = 0; i < Math.min(5, availableTracks.length); i++) {
-      const randomIndex = Math.floor(Math.random() * availableTracks.length);
-      const selectedTrack = availableTracks.splice(randomIndex, 1)[0];
-      randomTracks.push(selectedTrack.uri);
-      console.log(`Selected random track: ${selectedTrack.name} by ${selectedTrack.artists}`);
+    if (playCountData.length > 0) {
+      // Find tracks with minimum play count
+      const minPlayCount = playCountData[0].play_count;
+      const candidateTracks = playCountData.filter(track => track.play_count === minPlayCount);
+
+      // Randomly select from least-played tracks (to avoid always picking the same order)
+      for (let i = 0; i < Math.min(5, candidateTracks.length); i++) {
+        const randomIndex = Math.floor(Math.random() * candidateTracks.length);
+        const selectedTrack = candidateTracks.splice(randomIndex, 1)[0];
+
+        // Find the full track info from contextData
+        const fullTrackInfo = contextData.tracks.find(track => track.uri === selectedTrack.track_id);
+        if (fullTrackInfo) {
+          leastPlayedTracks.push({
+            uri: selectedTrack.track_id,
+            playCount: selectedTrack.play_count,
+            name: fullTrackInfo.name,
+            artists: fullTrackInfo.artists
+          });
+          console.log(`Selected least-played track: ${fullTrackInfo.name} by ${fullTrackInfo.artists} (played ${selectedTrack.play_count} times)`);
+        }
+      }
+    } else {
+      // Fallback: if no play count data, select first 5 tracks
+      for (let i = 0; i < Math.min(5, contextData.tracks.length); i++) {
+        const track = contextData.tracks[i];
+        leastPlayedTracks.push({
+          uri: track.uri,
+          playCount: 0,
+          name: track.name,
+          artists: track.artists
+        });
+        console.log(`Selected track (no play data): ${track.name} by ${track.artists}`);
+      }
     }
 
-    // Add random tracks to STSD playlist with delays
-    if (randomTracks.length > 0) {
-      for (let i = 0; i < randomTracks.length; i++) {
-        await spotifyClient.addTracksToSTSDPlaylist([randomTracks[i]]);
-        console.log(`Added track ${i + 1}/${randomTracks.length} to STSD playlist`);
+    // Add least-played tracks to STSD playlist with delays and increment play counts
+    if (leastPlayedTracks.length > 0) {
+      for (let i = 0; i < leastPlayedTracks.length; i++) {
+        const track = leastPlayedTracks[i];
+
+        await spotifyClient.addTracksToSTSDPlaylist([track.uri]);
+        await database.incrementPlayCount(contextUri, track.uri);
+
+        console.log(`Added track ${i + 1}/${leastPlayedTracks.length} to STSD playlist: ${track.name} (played ${track.playCount} times, now ${track.playCount + 1})`);
 
         // Add 1 second delay between track additions
-        if (i < randomTracks.length - 1) {
+        if (i < leastPlayedTracks.length - 1) {
           await new Promise(resolve => setTimeout(resolve, 1000));
         }
       }
