@@ -547,6 +547,59 @@ class SpotifyClient {
         }
     }
 
+    // Clear all tracks from STSD playlist
+    async clearSTSDPlaylist() {
+        if (!this.stsdPlaylistId) {
+            throw new Error('STSD playlist not initialized');
+        }
+
+        try {
+            await this.ensureValidToken();
+            
+            // Get current tracks in the playlist
+            const playlist = await this.api.playlists.getPlaylist(this.stsdPlaylistId);
+            
+            if (playlist.tracks.items.length === 0) {
+                console.log('STSD playlist is already empty');
+                return true;
+            }
+            
+            // Remove all tracks from playlist
+            const trackUris = playlist.tracks.items.map(item => ({ uri: item.track.uri }));
+            
+            await this.api.playlists.removeItemsFromPlaylist(this.stsdPlaylistId, {
+                tracks: trackUris
+            });
+            
+            console.log(`Cleared ${trackUris.length} tracks from STSD playlist`);
+            return true;
+            
+        } catch (error) {
+            console.error('Failed to clear STSD playlist:', error);
+            throw error;
+        }
+    }
+
+    // Add tracks to STSD playlist
+    async addTracksToSTSDPlaylist(trackUris) {
+        if (!this.stsdPlaylistId) {
+            throw new Error('STSD playlist not initialized');
+        }
+
+        try {
+            await this.ensureValidToken();
+            
+            await this.api.playlists.addItemsToPlaylist(this.stsdPlaylistId, trackUris);
+            
+            console.log(`Added ${trackUris.length} tracks to STSD playlist`);
+            return true;
+            
+        } catch (error) {
+            console.error('Failed to add tracks to STSD playlist:', error);
+            throw error;
+        }
+    }
+
     // Check if user is authenticated
     isUserAuthenticated() {
         return this.isAuthenticated;

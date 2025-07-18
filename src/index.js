@@ -100,58 +100,38 @@ app.get('/api/shuffle/start/spotify::contextType::contextId', async (req, res) =
     // Sync tracks with database (add new tracks, preserve existing play counts)
     await database.syncContextTracks(contextUri, contextData.tracks);
 
-    // Handle context switching vs regular startup
-    let playbackStarted = false;
+    // Clear STSD playlist and populate with random tracks
+    console.log('Clearing STSD playlist...');
+    await spotifyClient.clearSTSDPlaylist();
 
-    if (shuffleState.isActive && shuffleState.currentContext !== contextUri) {
-      // We're switching to a different context
-      console.log(`Switching from ${shuffleState.currentContext} to ${contextUri}`);
-      console.log('Forcing context switch with pause/resume...');
+    // Select 5 random tracks from the context
+    const randomTracks = [];
+    const availableTracks = [...contextData.tracks]; // Copy array to avoid modifying original
 
-      playbackStarted = await spotifyClient.forceContextSwitch(contextUri);
-      if (!playbackStarted) {
-        console.error('Failed to force context switch');
-        return res.status(500).json({ error: 'Failed to switch to new context' });
-      }
-    } else {
-      // Regular startup (first time or no active context)
-      console.log('Starting playback for new context...');
-      playbackStarted = await spotifyClient.startPlayback(contextUri);
+    for (let i = 0; i < Math.min(5, availableTracks.length); i++) {
+      const randomIndex = Math.floor(Math.random() * availableTracks.length);
+      const selectedTrack = availableTracks.splice(randomIndex, 1)[0];
+      randomTracks.push(selectedTrack.uri);
+      console.log(`Selected random track: ${selectedTrack.name} by ${selectedTrack.artists}`);
+    }
 
-      if (!playbackStarted) {
-        console.error('Failed to start playback');
-        return res.status(500).json({ error: 'Failed to start playback for context' });
-      }
+    // Add random tracks to STSD playlist
+    if (randomTracks.length > 0) {
+      await spotifyClient.addTracksToSTSDPlaylist(randomTracks);
+    }
+
+    // Start playing the STSD playlist instead of original context
+    const stsdPlaylistUri = `spotify:playlist:${spotifyClient.stsdPlaylistId}`;
+    console.log('Starting playback of STSD playlist...');
+    const playbackStarted = await spotifyClient.startPlayback(stsdPlaylistUri);
+
+    if (!playbackStarted) {
+      console.error('Failed to start STSD playlist playback');
+      return res.status(500).json({ error: 'Failed to start STSD playlist playback' });
     }
 
     // Start managing this context
     shuffleState.startShuffle(contextUri, contextData.tracks);
-
-    // Immediately populate queue with least-played tracks
-    const playCountData = await database.getContextPlayCounts(contextUri);
-
-    if (playCountData.length > 0) {
-      // Find tracks with minimum play count
-      const minPlayCount = playCountData[0].play_count;
-      const leastPlayedTracks = playCountData.filter(track => track.play_count === minPlayCount);
-
-      // Randomly select from least-played tracks and add to queue
-      const tracksToQueue = Math.min(5, leastPlayedTracks.length); // Queue up to 5 tracks
-
-      for (let i = 0; i < tracksToQueue; i++) {
-        const randomIndex = Math.floor(Math.random() * leastPlayedTracks.length);
-        const selectedTrack = leastPlayedTracks.splice(randomIndex, 1)[0];
-
-        await spotifyClient.addToQueue(selectedTrack.track_id);
-        await database.incrementPlayCount(contextUri, selectedTrack.track_id);
-        console.log(`Initially queued least-played track: ${selectedTrack.track_id} (played ${selectedTrack.play_count} times, now ${selectedTrack.play_count + 1})`);
-
-        // Add 1 second delay between queue additions to avoid API rate limiting
-        if (i < tracksToQueue - 1) {
-          await new Promise(resolve => setTimeout(resolve, 1000));
-        }
-      }
-    }
 
     res.json({
       message: 'Shuffle started successfully',
@@ -182,7 +162,7 @@ const shuffleCheckInterval = setInterval(async () => {
     const currentPlayback = await spotifyClient.getCurrentPlayback();
 
     if (shuffleState.shouldTakeControl(currentPlayback)) {
-      console.log('Taking control of playback for shuffle management');
+      console.log('Taking control of playback for shuffle management (DISABLED - using playlist approach)');
 
       // Get least-played tracks from database
       const playCountData = await database.getContextPlayCounts(shuffleState.currentContext);
@@ -199,9 +179,9 @@ const shuffleCheckInterval = setInterval(async () => {
           const randomIndex = Math.floor(Math.random() * leastPlayedTracks.length);
           const selectedTrack = leastPlayedTracks.splice(randomIndex, 1)[0];
 
-          await spotifyClient.addToQueue(selectedTrack.track_id);
-          await database.incrementPlayCount(shuffleState.currentContext, selectedTrack.track_id);
-          console.log(`Queued least-played track: ${selectedTrack.track_id} (played ${selectedTrack.play_count} times, now ${selectedTrack.play_count + 1})`);
+          // await spotifyClient.addToQueue(selectedTrack.track_id); // DISABLED - using playlist approach
+          // await database.incrementPlayCount(shuffleState.currentContext, selectedTrack.track_id); // DISABLED
+          // console.log(`Queued least-played track: ${selectedTrack.track_id} (played ${selectedTrack.play_count} times, now ${selectedTrack.play_count + 1})`); // DISABLED
 
           // Add 1 second delay between queue additions to avoid API rate limiting
           if (i < tracksToQueue - 1) {
@@ -213,7 +193,7 @@ const shuffleCheckInterval = setInterval(async () => {
       }
 
     } else {
-      console.log('Playback under our control, monitoring...');
+      // console.log('Playback under our control, monitoring...'); // DISABLED - too verbose
     }
   } catch (error) {
     console.error('Error during shuffle check:', error);
