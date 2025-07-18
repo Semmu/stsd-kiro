@@ -158,77 +158,13 @@ app.get('/api/shuffle/start/spotify::contextType::contextId', async (req, res) =
       });
     }
 
-    // Fetch all tracks from the context
+    // Fetch context data to get the original name
     const contextData = await spotifyClient.getContextTracks(contextUri);
+    console.log(`Fetched context: ${contextData.type} - ${contextData.id}`);
 
-    console.log(`Fetched ${contextData.totalTracks} tracks from ${contextData.type}: ${contextData.id}`);
-
-    // Sync tracks with database (add new tracks, preserve existing play counts)
-    await database.syncContextTracks(contextUri, contextData.tracks);
-
-    // Pause playback before modifying playlist to prevent auto-play during updates
-    console.log('Pausing playback before playlist modification...');
-    await spotifyClient.pausePlayback();
-    await new Promise(resolve => setTimeout(resolve, 1500)); // Safety delay after pause
-
-    // Ensure STSD playlist exists and get its ID
-    console.log('Ensuring STSD playlist exists...');
-    const stsdPlaylistId = await spotifyClient.ensureSTSDPlaylist();
-    shuffleState.setStsdPlaylistId(stsdPlaylistId);
-    await new Promise(resolve => setTimeout(resolve, 1000)); // Safety delay after playlist creation
-
-    // Clear STSD playlist to start fresh
-    console.log('Clearing STSD playlist...');
-    await spotifyClient.clearSTSDPlaylist();
-    await new Promise(resolve => setTimeout(resolve, 1500)); // Safety delay after clearing
-
-    // Add ONLY the first track to playlist, then use queue for remaining tracks
-    console.log('Adding first track to playlist...');
-    const firstTrackResult = await addOneLeastPlayedTrack(contextUri, contextData.tracks);
-
-    if (!firstTrackResult.success) {
-      console.error('Failed to add first track');
-      return res.status(500).json({ error: 'Failed to add first track to STSD playlist' });
-    }
-
-    console.log(`First track added: ${firstTrackResult.trackInfo.name}`);
-    await new Promise(resolve => setTimeout(resolve, 2000)); // Safety delay after first track
-
-    // Start playback with the single track in playlist
-    const stsdPlaylistUri = `spotify:playlist:${stsdPlaylistId}`;
-    console.log('Starting playback with single track in playlist...');
-    const playbackStarted = await spotifyClient.startPlaybackWithShuffle(stsdPlaylistUri, null, false);
-
-    if (!playbackStarted) {
-      console.error('Failed to start STSD playlist playback');
-      return res.status(500).json({ error: 'Failed to start STSD playlist playback' });
-    }
-
-    await new Promise(resolve => setTimeout(resolve, 2000)); // Safety delay after playback start
-
-    // Now add remaining tracks to queue
-    const remainingTracks = PLAYLIST_TARGET_SIZE - 1;
-    console.log(`Adding ${remainingTracks} remaining tracks to queue...`);
-
-    for (let i = 0; i < remainingTracks; i++) {
-      await new Promise(resolve => setTimeout(resolve, 1500)); // Delay before each queue addition
-
-      const result = await addOneLeastPlayedTrack(contextUri, contextData.tracks);
-
-      if (result.success) {
-        // Add to queue instead of playlist
-        await spotifyClient.addToQueue(result.trackUri);
-        console.log(`Added to queue (${i + 2}/${PLAYLIST_TARGET_SIZE}): ${result.trackInfo.name}`);
-      } else {
-        console.log(`Failed to add track ${i + 2} to queue, stopping`);
-        break;
-      }
-    }
-
-    console.log('Shuffle setup complete: 1 track in playlist + remaining tracks queued');
-
-    // Start managing this context
-    shuffleState.startShuffle(contextUri, contextData.tracks);
+    // Create a fresh STSD playlist for this shuffle session
+    const originalContextName = `${contextData.type} ${contextData.id}`;
+    const stsdPlaylistId = await spotifyClient.createFreshSTSDPlaylist(originalContextName);
 
     res.json({
       message: 'Shuffle started successfully',
