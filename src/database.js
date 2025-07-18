@@ -111,6 +111,28 @@ class Database {
         });
     }
 
+    // Get recently added tracks (most recent last_played timestamps)
+    // These are the tracks we added to queue recently
+    async getRecentlyAddedTracks(contextId, limit = 10) {
+        return new Promise((resolve, reject) => {
+            const sql = `
+        SELECT track_id, play_count, last_played 
+        FROM play_counts 
+        WHERE context_id = ? 
+        ORDER BY last_played DESC
+        LIMIT ?
+      `;
+
+            this.db.all(sql, [contextId, limit], (err, rows) => {
+                if (err) {
+                    reject(err);
+                } else {
+                    resolve(rows);
+                }
+            });
+        });
+    }
+
     // Get stats for a context
     async getContextStats(contextId) {
         return new Promise((resolve, reject) => {
@@ -191,8 +213,8 @@ class Database {
     async resetAllPlayCounts() {
         return new Promise((resolve, reject) => {
             const sql = 'UPDATE play_counts SET play_count = 0, last_played = NULL';
-            
-            this.db.run(sql, function(err) {
+
+            this.db.run(sql, function (err) {
                 if (err) {
                     reject(err);
                 } else {

@@ -794,6 +794,36 @@ class SpotifyClient {
         }
     }
 
+    // Get current playback queue
+    async getQueue() {
+        if (!this.isAuthenticated || !this.api) {
+            throw new Error('Not authenticated with Spotify');
+        }
+
+        try {
+            await this.ensureValidToken();
+            
+            // Use direct HTTP API call for queue
+            const response = await fetch('https://api.spotify.com/v1/me/player/queue', {
+                method: 'GET',
+                headers: {
+                    'Authorization': `Bearer ${this.accessToken}`
+                }
+            });
+
+            if (response.ok) {
+                const queueData = await response.json();
+                return queueData;
+            } else {
+                console.error(`Failed to get queue: HTTP ${response.status}`);
+                return null;
+            }
+        } catch (error) {
+            console.error('Failed to get queue:', error);
+            return null;
+        }
+    }
+
     // Check if user is authenticated
     isUserAuthenticated() {
         return this.isAuthenticated;
