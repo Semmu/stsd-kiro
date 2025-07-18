@@ -187,6 +187,22 @@ class Database {
         });
     }
 
+    // Reset all play counts to zero (debug function)
+    async resetAllPlayCounts() {
+        return new Promise((resolve, reject) => {
+            const sql = 'UPDATE play_counts SET play_count = 0, last_played = NULL';
+            
+            this.db.run(sql, function(err) {
+                if (err) {
+                    reject(err);
+                } else {
+                    console.log(`Reset ${this.changes} play count records to zero`);
+                    resolve(this.changes);
+                }
+            });
+        });
+    }
+
     // Close database connection
     close() {
         if (this.db) {
