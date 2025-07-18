@@ -32,3 +32,13 @@ This is STSD (Spotify True Shuffle Daemon). Read `DESIGN.md` for full project co
 - Make testing easy with GET endpoints and browser-friendly URLs
 - Accept full Spotify URIs in URL paths (copy-paste friendly)
 - Use real Spotify playlists for testing
+
+### MCP Search Usage
+- **Always ask for permission before using search** - User has limited quota
+- Only suggest searches for:
+  - Specific API errors that need documentation lookup
+  - Verifying current best practices for implementation
+  - Breaking changes or deprecations research
+  - Technical roadblocks requiring external documentation
+- Use search strategically for most valuable lookups while conserving quota
+- Don't search for general information that can be reasoned about
