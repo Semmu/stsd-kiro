@@ -10,9 +10,11 @@ This is STSD (Spotify True Shuffle Daemon). Read `DESIGN.md` for full project co
 ## Development Workflow
 
 ### Git Commits
+- **NEVER commit automatically** - Only commit when explicitly asked by the user
 - **ALWAYS remind user to commit after atomic changes** - Don't let multiple features accumulate
 - Use descriptive commit messages that explain what was implemented
-- Remind the user when changes are ready to commit, but don't commit automatically
+- Remind the user when changes are ready to commit, but NEVER commit without explicit instruction
+- If user says "commit" or similar, then proceed with git add and commit
 
 ### Documentation
 - **Keep documentation up-to-date** - Update DESIGN.md and steering docs when functionality, architecture, or workflow changes

@@ -176,7 +176,7 @@ app.get('/api/shuffle/start/spotify::contextType::contextId', async (req, res) =
     // Add first track and immediately start playback to establish proper context
     console.log('Adding first track and starting playback...');
     const firstTrackSuccess = await addOneLeastPlayedTrack(contextUri, contextData.tracks);
-    
+
     if (!firstTrackSuccess) {
       console.error('Failed to add first track');
       return res.status(500).json({ error: 'Failed to add first track to STSD playlist' });
@@ -197,13 +197,13 @@ app.get('/api/shuffle/start/spotify::contextType::contextId', async (req, res) =
     // Add remaining tracks with delays
     const remainingTracks = PLAYLIST_TARGET_SIZE - 1;
     let addedCount = 1; // Already added first track
-    
+
     for (let i = 0; i < remainingTracks; i++) {
       // Add delay before each additional track
       await new Promise(resolve => setTimeout(resolve, 2000));
-      
+
       const success = await addOneLeastPlayedTrack(contextUri, contextData.tracks);
-      
+
       if (success) {
         addedCount++;
         console.log(`Progress: ${addedCount}/${PLAYLIST_TARGET_SIZE} tracks added`);
@@ -212,7 +212,7 @@ app.get('/api/shuffle/start/spotify::contextType::contextId', async (req, res) =
         break;
       }
     }
-    
+
     console.log(`Successfully added ${addedCount} tracks to STSD playlist with proper playback order`);
 
     // Start managing this context
