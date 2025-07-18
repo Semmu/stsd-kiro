@@ -60,6 +60,68 @@ class SpotifyClient {
         }
     }
 
+    // Check if token needs refresh and refresh if necessary
+    async ensureValidToken() {
+        if (!this.refreshToken) {
+            throw new Error('No refresh token available, re-authentication required');
+        }
+
+        const now = Date.now();
+        const bufferTime = 300000; // 5 minutes buffer
+
+        // Check if token is expired or will expire soon
+        if (!this.expiresAt || now >= (this.expiresAt - bufferTime)) {
+            console.log('Token expired or expiring soon, refreshing...');
+            
+            try {
+                const response = await fetch('https://accounts.spotify.com/api/token', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                        'Authorization': `Basic ${Buffer.from(`${process.env.SPOTIFY_CLIENT_ID}:${process.env.SPOTIFY_CLIENT_SECRET}`).toString('base64')}`
+                    },
+                    body: new URLSearchParams({
+                        grant_type: 'refresh_token',
+                        refresh_token: this.refreshToken
+                    })
+                });
+
+                const data = await response.json();
+
+                if (data.access_token) {
+                    // Update tokens
+                    this.accessToken = data.access_token;
+                    if (data.refresh_token) {
+                        this.refreshToken = data.refresh_token;
+                    }
+                    this.expiresAt = Date.now() + (data.expires_in * 1000);
+
+                    // Save updated tokens
+                    await this.saveTokens();
+
+                    // Reinitialize API with new token
+                    this.api = SpotifyApi.withAccessToken(process.env.SPOTIFY_CLIENT_ID, {
+                        access_token: this.accessToken,
+                        refresh_token: this.refreshToken,
+                        expires_in: data.expires_in
+                    });
+
+                    console.log('Token refreshed successfully');
+                    return true;
+                } else {
+                    console.error('Token refresh failed:', data);
+                    throw new Error('Failed to refresh token: ' + (data.error_description || data.error || 'Unknown error'));
+                }
+            } catch (error) {
+                console.error('Token refresh failed:', error);
+                this.isAuthenticated = false;
+                throw new Error('Token refresh failed, re-authentication required: ' + error.message);
+            }
+        }
+
+        return true;
+    }
+
 
 
     // Initialize with client credentials (for basic API access)
@@ -151,6 +213,7 @@ class SpotifyClient {
         }
 
         try {
+            await this.ensureValidToken();
             return await this.api.player.getCurrentlyPlayingTrack();
         } catch (error) {
             console.error('Failed to get current playback:', error);
@@ -165,6 +228,7 @@ class SpotifyClient {
         }
 
         try {
+            await this.ensureValidToken();
             const user = await this.api.currentUser.profile();
             return {
                 id: user.id,
@@ -186,6 +250,7 @@ class SpotifyClient {
         }
 
         try {
+            await this.ensureValidToken();
             // Parse context URI to determine type
             const [, type, id] = contextUri.split(':');
 
@@ -263,6 +328,7 @@ class SpotifyClient {
         }
 
         try {
+            await this.ensureValidToken();
             // Check if we have available devices first
             const devices = await this.getDevices();
             console.log(`Available devices: ${devices.length}`);
@@ -324,6 +390,7 @@ class SpotifyClient {
         }
 
         try {
+            await this.ensureValidToken();
             await this.api.player.addItemToPlaybackQueue(trackUri, deviceId);
             console.log(`Added to queue: ${trackUri}`);
             return true;
@@ -340,6 +407,7 @@ class SpotifyClient {
         }
 
         try {
+            await this.ensureValidToken();
             const devices = await this.api.player.getAvailableDevices();
             return devices.devices;
         } catch (error) {
