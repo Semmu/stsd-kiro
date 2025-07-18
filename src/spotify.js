@@ -398,9 +398,28 @@ class SpotifyClient {
 
         try {
             await this.ensureValidToken();
-            await this.api.player.addItemToPlaybackQueue(trackUri, deviceId);
-            console.log(`Added to queue: ${trackUri}`);
-            return true;
+            
+            // Use direct HTTP API call instead of SDK due to JSON parsing issues
+            const url = new URL('https://api.spotify.com/v1/me/player/queue');
+            url.searchParams.append('uri', trackUri);
+            if (deviceId) {
+                url.searchParams.append('device_id', deviceId);
+            }
+
+            const response = await fetch(url.toString(), {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${this.accessToken}`
+                }
+            });
+
+            if (response.ok || response.status === 204) {
+                console.log(`Added to queue: ${trackUri}`);
+                return true;
+            } else {
+                const errorText = await response.text();
+                throw new Error(`HTTP ${response.status}: ${errorText}`);
+            }
         } catch (error) {
             console.error('Failed to add track to queue:', error);
             throw error;
