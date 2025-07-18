@@ -37,6 +37,19 @@ class SpotifyClient {
                 } else {
                     console.log('Loaded existing Spotify tokens (expired - will refresh automatically)');
                 }
+
+                // Ensure STSD playlist exists for already authenticated users
+                try {
+                    await this.ensureSTSDPlaylist();
+                } catch (error) {
+                    if (error.message.includes('Insufficient client scope')) {
+                        console.log('⚠️  STSD needs additional permissions to create playlists.');
+                        console.log('   Please re-authenticate by visiting: http://127.0.0.1:3000/auth/login');
+                        this.needsReauth = true;
+                    } else {
+                        console.error('Failed to ensure STSD playlist on startup:', error);
+                    }
+                }
             }
         } catch (error) {
             console.log('No existing tokens found, authentication required');
@@ -72,7 +85,7 @@ class SpotifyClient {
         // Check if token is expired or will expire soon
         if (!this.expiresAt || now >= (this.expiresAt - bufferTime)) {
             console.log('Token expired or expiring soon, refreshing...');
-            
+
             try {
                 const response = await fetch('https://accounts.spotify.com/api/token', {
                     method: 'POST',
@@ -146,7 +159,9 @@ class SpotifyClient {
             'user-modify-playback-state',
             'user-read-currently-playing',
             'playlist-read-private',
-            'playlist-read-collaborative'
+            'playlist-read-collaborative',
+            'playlist-modify-private',
+            'playlist-modify-public'
         ];
 
         const params = new URLSearchParams({
@@ -196,6 +211,15 @@ class SpotifyClient {
                 });
 
                 console.log('Spotify user authentication successful');
+
+                // Create/find the dedicated STSD playlist
+                try {
+                    await this.ensureSTSDPlaylist();
+                } catch (error) {
+                    console.error('Failed to create STSD playlist during authentication:', error);
+                    // Don't fail authentication if playlist creation fails
+                }
+
                 return true;
             }
 
@@ -424,9 +448,9 @@ class SpotifyClient {
 
         try {
             await this.ensureValidToken();
-            
+
             console.log('Forcing context switch with offset to clear queue...');
-            
+
             // Get devices first
             const devices = await this.getDevices();
             if (devices.length === 0) {
@@ -446,14 +470,14 @@ class SpotifyClient {
 
             // Use direct HTTP API with offset to force context switch and clear queue
             const url = `https://api.spotify.com/v1/me/player/play?device_id=${deviceId}`;
-            
+
             const playbackOptions = {
                 context_uri: contextUri,
                 offset: { position: 0 } // Start from first track - this should clear queue
             };
-            
+
             console.log(`Force switching to context: ${contextUri} with offset`);
-            
+
             const response = await fetch(url, {
                 method: 'PUT',
                 headers: {
@@ -462,17 +486,63 @@ class SpotifyClient {
                 },
                 body: JSON.stringify(playbackOptions)
             });
-            
+
             if (!response.ok) {
                 const errorText = await response.text();
                 throw new Error(`HTTP ${response.status}: ${errorText}`);
             }
-            
+
             console.log('Context switch with offset successful');
             return true;
-            
+
         } catch (error) {
             console.error('Failed to force context switch:', error);
+            throw error;
+        }
+    }
+
+    // Find or create the dedicated STSD playlist
+    async ensureSTSDPlaylist() {
+        if (!this.isAuthenticated || !this.api) {
+            throw new Error('Not authenticated with Spotify');
+        }
+
+        try {
+            await this.ensureValidToken();
+
+            const playlistName = 'STSD Shuffle';
+            const playlistDescription = 'Managed by Spotify True Shuffle Daemon - Do not modify manually';
+
+            // Get current user to create playlist
+            const user = await this.api.currentUser.profile();
+
+            // Search for existing STSD playlist
+            const playlists = await this.api.playlists.getUsersPlaylists(user.id, 50);
+
+            let stsdPlaylist = playlists.items.find(playlist =>
+                playlist.name === playlistName && playlist.owner.id === user.id
+            );
+
+            if (stsdPlaylist) {
+                console.log(`Found existing STSD playlist: ${stsdPlaylist.id}`);
+                this.stsdPlaylistId = stsdPlaylist.id;
+                return stsdPlaylist.id;
+            }
+
+            // Create new STSD playlist
+            console.log('Creating new STSD playlist...');
+            const newPlaylist = await this.api.playlists.createPlaylist(user.id, {
+                name: playlistName,
+                description: playlistDescription,
+                public: false
+            });
+
+            console.log(`Created STSD playlist: ${newPlaylist.id}`);
+            this.stsdPlaylistId = newPlaylist.id;
+            return newPlaylist.id;
+
+        } catch (error) {
+            console.error('Failed to ensure STSD playlist:', error);
             throw error;
         }
     }
