@@ -600,8 +600,8 @@ class SpotifyClient {
         }
     }
 
-    // Start playback with shuffle control
-    async startPlaybackWithShuffle(contextUri, deviceId = null, shuffle = false) {
+    // Start playback with shuffle control and optional track offset
+    async startPlaybackWithShuffle(contextUri, deviceId = null, shuffle = false, trackUri = null) {
         if (!this.isAuthenticated || !this.api) {
             throw new Error('Not authenticated with Spotify');
         }
@@ -631,7 +631,7 @@ class SpotifyClient {
 
             const playbackOptions = {
                 context_uri: contextUri,
-                offset: { position: 0 }
+                offset: trackUri ? { uri: trackUri } : { position: 0 }
             };
 
             console.log(`Starting playback: ${contextUri}, shuffle: ${shuffle}`);
@@ -787,6 +787,39 @@ class SpotifyClient {
             return true;
         } catch (error) {
             console.error('Failed to add tracks to playlist:', error);
+            throw error;
+        }
+    }
+
+    // Create a new fresh STSD playlist for each shuffle session
+    async createFreshSTSDPlaylist(originalContextName) {
+        if (!this.isAuthenticated || !this.api) {
+            throw new Error('Not authenticated with Spotify');
+        }
+
+        try {
+            await this.ensureValidToken();
+
+            // Create playlist name with original context
+            const playlistName = `[STSD] ${originalContextName}`;
+            const playlistDescription = 'Managed by Spotify True Shuffle Daemon - Auto-generated playlist';
+
+            // Get current user to create playlist
+            const user = await this.api.currentUser.profile();
+
+            console.log(`Creating fresh STSD playlist: ${playlistName}`);
+            const newPlaylist = await this.api.playlists.createPlaylist(user.id, {
+                name: playlistName,
+                description: playlistDescription,
+                public: false
+            });
+
+            console.log(`Created fresh STSD playlist: ${newPlaylist.id}`);
+            this.stsdPlaylistId = newPlaylist.id;
+            return newPlaylist.id;
+
+        } catch (error) {
+            console.error('Failed to create fresh STSD playlist:', error);
             throw error;
         }
     }

@@ -41,15 +41,21 @@ async function addOneLeastPlayedTrack(contextUri, allTracks) {
     // Add the track to the playlist
     await spotifyClient.addToPlaylist(stsdPlaylistId, [leastPlayedTrack.track_id]);
 
+    await new Promise(resolve => setTimeout(resolve, 500)); // Safety delay after playlist addition
+
     // Increment play count immediately so next query won't select the same track
     await database.incrementPlayCount(contextUri, leastPlayedTrack.track_id);
 
     console.log(`Added least-played track: ${fullTrackInfo.name} by ${fullTrackInfo.artists} (played ${leastPlayedTrack.play_count} times, now ${leastPlayedTrack.play_count + 1})`);
 
-    return true;
+    return {
+      success: true,
+      trackUri: leastPlayedTrack.track_id,
+      trackInfo: fullTrackInfo
+    };
   } catch (error) {
     console.error('Error adding least-played track:', error);
-    return false;
+    return { success: false };
   }
 }
 
@@ -163,28 +169,34 @@ app.get('/api/shuffle/start/spotify::contextType::contextId', async (req, res) =
     // Pause playback before modifying playlist to prevent auto-play during updates
     console.log('Pausing playback before playlist modification...');
     await spotifyClient.pausePlayback();
+    await new Promise(resolve => setTimeout(resolve, 1500)); // Safety delay after pause
 
     // Ensure STSD playlist exists and get its ID
     console.log('Ensuring STSD playlist exists...');
     const stsdPlaylistId = await spotifyClient.ensureSTSDPlaylist();
     shuffleState.setStsdPlaylistId(stsdPlaylistId);
+    await new Promise(resolve => setTimeout(resolve, 1000)); // Safety delay after playlist creation
 
     // Clear STSD playlist to start fresh
     console.log('Clearing STSD playlist...');
     await spotifyClient.clearSTSDPlaylist();
+    await new Promise(resolve => setTimeout(resolve, 1500)); // Safety delay after clearing
 
-    // Add first track and immediately start playback to establish proper context
-    console.log('Adding first track and starting playback...');
-    const firstTrackSuccess = await addOneLeastPlayedTrack(contextUri, contextData.tracks);
+    // Add ONLY the first track to playlist, then use queue for remaining tracks
+    console.log('Adding first track to playlist...');
+    const firstTrackResult = await addOneLeastPlayedTrack(contextUri, contextData.tracks);
 
-    if (!firstTrackSuccess) {
+    if (!firstTrackResult.success) {
       console.error('Failed to add first track');
       return res.status(500).json({ error: 'Failed to add first track to STSD playlist' });
     }
 
-    // Start playing the STSD playlist immediately after first track to establish context
+    console.log(`First track added: ${firstTrackResult.trackInfo.name}`);
+    await new Promise(resolve => setTimeout(resolve, 2000)); // Safety delay after first track
+
+    // Start playback with the single track in playlist
     const stsdPlaylistUri = `spotify:playlist:${stsdPlaylistId}`;
-    console.log('Starting playback of STSD playlist with first track...');
+    console.log('Starting playback with single track in playlist...');
     const playbackStarted = await spotifyClient.startPlaybackWithShuffle(stsdPlaylistUri, null, false);
 
     if (!playbackStarted) {
@@ -192,28 +204,28 @@ app.get('/api/shuffle/start/spotify::contextType::contextId', async (req, res) =
       return res.status(500).json({ error: 'Failed to start STSD playlist playback' });
     }
 
-    console.log('Playback started successfully, now adding remaining tracks...');
+    await new Promise(resolve => setTimeout(resolve, 2000)); // Safety delay after playback start
 
-    // Add remaining tracks with delays
+    // Now add remaining tracks to queue
     const remainingTracks = PLAYLIST_TARGET_SIZE - 1;
-    let addedCount = 1; // Already added first track
+    console.log(`Adding ${remainingTracks} remaining tracks to queue...`);
 
     for (let i = 0; i < remainingTracks; i++) {
-      // Add delay before each additional track
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      await new Promise(resolve => setTimeout(resolve, 1500)); // Delay before each queue addition
 
-      const success = await addOneLeastPlayedTrack(contextUri, contextData.tracks);
+      const result = await addOneLeastPlayedTrack(contextUri, contextData.tracks);
 
-      if (success) {
-        addedCount++;
-        console.log(`Progress: ${addedCount}/${PLAYLIST_TARGET_SIZE} tracks added`);
+      if (result.success) {
+        // Add to queue instead of playlist
+        await spotifyClient.addToQueue(result.trackUri);
+        console.log(`Added to queue (${i + 2}/${PLAYLIST_TARGET_SIZE}): ${result.trackInfo.name}`);
       } else {
-        console.log(`Failed to add track ${i + 2}, stopping`);
+        console.log(`Failed to add track ${i + 2} to queue, stopping`);
         break;
       }
     }
 
-    console.log(`Successfully added ${addedCount} tracks to STSD playlist with proper playback order`);
+    console.log('Shuffle setup complete: 1 track in playlist + remaining tracks queued');
 
     // Start managing this context
     shuffleState.startShuffle(contextUri, contextData.tracks);
@@ -281,6 +293,8 @@ const playlistManagementInterval = setInterval(async () => {
       const trackUrisToRemove = tracksToRemove.map(track => ({ uri: track.uri }));
       await spotifyClient.removeFromPlaylist(stsdPlaylistId, trackUrisToRemove);
 
+      await new Promise(resolve => setTimeout(resolve, 2000)); // Safety delay after removal
+
       // Update play counts in database
       for (const track of tracksToRemove) {
         await database.incrementPlayCount(shuffleState.currentContext, track.uri);
@@ -289,6 +303,7 @@ const playlistManagementInterval = setInterval(async () => {
     }
 
     // Get updated playlist length after removals
+    await new Promise(resolve => setTimeout(resolve, 1000)); // Safety delay before querying updated state
     const updatedPlaylistTracks = await spotifyClient.getPlaylistTracks(stsdPlaylistId);
     const remainingTracks = updatedPlaylistTracks.length;
     console.log(`STSD playlist now has ${remainingTracks} tracks`);
@@ -302,9 +317,9 @@ const playlistManagementInterval = setInterval(async () => {
       let addedCount = 0;
 
       for (let i = 0; i < tracksNeeded; i++) {
-        const success = await addOneLeastPlayedTrack(shuffleState.currentContext, shuffleState.getAllTracks());
+        const result = await addOneLeastPlayedTrack(shuffleState.currentContext, shuffleState.getAllTracks());
 
-        if (success) {
+        if (result.success) {
           addedCount++;
         } else {
           console.log(`Failed to add track ${i + 1} during continuous management`);
