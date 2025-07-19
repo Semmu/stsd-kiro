@@ -127,22 +127,25 @@ app.get('/api/debug/reset-counts', async (req, res) => {
   }
 });
 
-// Shuffle control endpoints
-app.get('/api/shuffle/start/spotify::contextType::contextId', async (req, res) => {
+// Shuffle control endpoint - takes over whatever is currently playing
+app.get('/api/shuffle/start', async (req, res) => {
   try {
-    const { contextType, contextId } = req.params;
-    const contextUri = `spotify:${contextType}:${contextId}`;
-
     if (!spotifyClient.isUserAuthenticated()) {
       return res.status(401).json({ error: 'Not authenticated with Spotify' });
     }
 
-    // Validate context type
-    if (!['playlist', 'album'].includes(contextType)) {
-      return res.status(400).json({ error: 'Invalid context type. Supported: playlist, album' });
+    // Get current playback to determine what context to shuffle
+    console.log('Getting current playback to determine context...');
+    const currentPlayback = await spotifyClient.getCurrentPlayback();
+
+    if (!currentPlayback || !currentPlayback.context) {
+      return res.status(400).json({
+        error: 'No active playback context found. Please start playing a playlist or album in Spotify first.'
+      });
     }
 
-    console.log(`Starting shuffle for context: ${contextUri}`);
+    const contextUri = currentPlayback.context.uri;
+    console.log(`Starting shuffle for current context: ${contextUri}`);
 
     // Check if we're already managing this exact context (idempotency)
     if (shuffleState.isManagingContext(contextUri)) {
@@ -151,15 +154,26 @@ app.get('/api/shuffle/start/spotify::contextType::contextId', async (req, res) =
         message: 'Already shuffling this context',
         context: {
           uri: contextUri,
-          type: contextType,
-          id: contextId,
           alreadyActive: true
         }
       });
     }
 
     // Fetch context data to get the original name
-    const contextData = await spotifyClient.getContextTracks(contextUri);
+    let contextData;
+    try {
+      contextData = await spotifyClient.getContextTracks(contextUri);
+    } catch (error) {
+      // Check if this is a 404 error for a Spotify-generated playlist
+      if (error.message.includes('404') && contextUri.includes('playlist')) {
+        return res.status(400).json({
+          error: 'Cannot shuffle this playlist',
+          details: 'This appears to be a Spotify-generated playlist (like Daily Mix, Discover Weekly, etc.) that cannot be accessed. Please try with a regular user-created playlist or album.',
+          contextUri: contextUri
+        });
+      }
+      throw error; // Re-throw other errors
+    }
     console.log(`Fetched context: ${contextData.type} - ${contextData.id}`);
 
     // Sync tracks with database (add new tracks, preserve existing play counts)
@@ -260,7 +274,39 @@ app.get('/api/shuffle/start/spotify::contextType::contextId', async (req, res) =
   }
 });
 
+// Stop shuffle endpoint
+app.get('/api/shuffle/stop', async (req, res) => {
+  try {
+    if (shuffleState.isActive) {
+      shuffleState.stopShuffle();
+      res.json({ message: 'Shuffle stopped successfully' });
+    } else {
+      res.json({ message: 'No active shuffle to stop' });
+    }
+  } catch (error) {
+    console.error('Failed to stop shuffle:', error);
+    res.status(500).json({ error: 'Failed to stop shuffle', details: error.message });
+  }
+});
 
+// Debug endpoint to check current playback
+app.get('/api/debug/current-playback', async (req, res) => {
+  try {
+    if (!spotifyClient.isUserAuthenticated()) {
+      return res.status(401).json({ error: 'Not authenticated with Spotify' });
+    }
+
+    const currentPlayback = await spotifyClient.getCurrentPlayback();
+    res.json({
+      currentPlayback: currentPlayback,
+      hasContext: !!currentPlayback?.context,
+      contextUri: currentPlayback?.context?.uri || null
+    });
+  } catch (error) {
+    console.error('Failed to get current playback:', error);
+    res.status(500).json({ error: 'Failed to get current playback', details: error.message });
+  }
+});
 
 // Background queue monitoring - runs every 20 seconds
 const queueMonitoringInterval = setInterval(async () => {
