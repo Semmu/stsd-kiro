@@ -304,8 +304,8 @@ app.get('/api/debug/context-tracks', async (req, res) => {
     // Get current playback first
     const currentPlayback = await spotifyClient.getCurrentPlayback();
     if (!currentPlayback || !currentPlayback.context) {
-      return res.status(400).json({ 
-        error: 'No active playback context found' 
+      return res.status(400).json({
+        error: 'No active playback context found'
       });
     }
 
@@ -314,7 +314,7 @@ app.get('/api/debug/context-tracks', async (req, res) => {
 
     // Parse context URI to get type and ID
     const [, type, id] = contextUri.split(':');
-    
+
     if (type !== 'playlist') {
       return res.status(400).json({
         error: 'This debug endpoint only works with playlists',
@@ -323,16 +323,14 @@ app.get('/api/debug/context-tracks', async (req, res) => {
       });
     }
 
-    // Make manual HTTP request to Spotify API
     await spotifyClient.ensureValidToken();
     const accessToken = spotifyClient.accessToken;
 
-    // Build the request URL - get first 50 tracks
-    const url = `https://api.spotify.com/v1/playlists/${id}/tracks?limit=50&offset=0&fields=items(track(id,uri,name,artists(name),duration_ms)),total`;
+    // First, try direct playlist access
+    console.log(`Debug: Trying direct playlist access...`);
+    const directUrl = `https://api.spotify.com/v1/playlists/${id}/tracks?limit=50&offset=0&fields=items(track(id,uri,name,artists(name),duration_ms)),total`;
 
-    console.log(`Debug: Making request to: ${url}`);
-
-    const response = await fetch(url, {
+    const directResponse = await fetch(directUrl, {
       method: 'GET',
       headers: {
         'Authorization': `Bearer ${accessToken}`,
@@ -340,12 +338,11 @@ app.get('/api/debug/context-tracks', async (req, res) => {
       }
     });
 
-    console.log(`Debug: Response status: ${response.status}`);
+    console.log(`Debug: Direct access response status: ${directResponse.status}`);
 
-    if (response.ok) {
-      const data = await response.json();
-      
-      // Extract track info
+    if (directResponse.ok) {
+      // Direct access worked - regular playlist
+      const data = await directResponse.json();
       const tracks = data.items
         .filter(item => item.track && item.track.type === 'track')
         .map(item => ({
@@ -356,35 +353,161 @@ app.get('/api/debug/context-tracks', async (req, res) => {
           duration_ms: item.track.duration_ms
         }));
 
-      res.json({
+      return res.json({
         success: true,
+        method: 'direct_access',
         contextUri: contextUri,
         playlistId: id,
         totalTracks: data.total,
         tracksRetrieved: tracks.length,
-        tracks: tracks,
-        rawResponse: data // Include raw response for debugging
+        tracks: tracks
+      });
+    }
+
+    // Direct access failed - try the "followed playlists" method
+    console.log(`Debug: Direct access failed, trying user playlists method...`);
+
+    // Get ALL user's playlists with pagination (this includes followed generated playlists)
+    console.log(`Debug: Fetching ALL user playlists with pagination...`);
+    let allPlaylists = [];
+    let offset = 0;
+    const limit = 50;
+    let hasMore = true;
+
+    while (hasMore) {
+      const userPlaylistsUrl = `https://api.spotify.com/v1/me/playlists?limit=${limit}&offset=${offset}`;
+      console.log(`Debug: Fetching batch from: ${userPlaylistsUrl}`);
+
+      const userPlaylistsResponse = await fetch(userPlaylistsUrl, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json'
+        }
       });
 
-    } else {
-      const errorText = await response.text();
-      console.log(`Debug: Error response: ${errorText}`);
-      
-      res.json({
+      console.log(`Debug: User playlists batch response status: ${userPlaylistsResponse.status}`);
+
+      if (!userPlaylistsResponse.ok) {
+        const errorText = await userPlaylistsResponse.text();
+        console.log(`Debug: User playlists error: ${errorText}`);
+        return res.json({
+          success: false,
+          method: 'user_playlists_failed',
+          contextUri: contextUri,
+          playlistId: id,
+          httpStatus: userPlaylistsResponse.status,
+          errorText: errorText
+        });
+      }
+
+      const batchData = await userPlaylistsResponse.json();
+      console.log(`Debug: Got ${batchData.items.length} playlists in this batch (offset: ${offset})`);
+
+      allPlaylists.push(...batchData.items);
+
+      // Check if we have more pages
+      hasMore = batchData.items.length === limit && batchData.next !== null;
+      offset += limit;
+
+      if (hasMore) {
+        console.log(`Debug: More playlists available, continuing pagination...`);
+      }
+    }
+
+    console.log(`Debug: Total playlists fetched: ${allPlaylists.length}`);
+    console.log(`Debug: Looking for playlist ID: ${id}`);
+
+    // Print ALL playlists for debugging
+    console.log(`Debug: ALL ${allPlaylists.length} playlists:`);
+    allPlaylists.forEach((p, index) => {
+      console.log(`  ${index + 1}. "${p.name}" (${p.id}) - Owner: ${p.owner?.display_name || 'unknown'}`);
+    });
+
+    // Look for any playlists that might be Discover Weekly or similar
+    const discoverPlaylists = allPlaylists.filter(p =>
+      p.name.toLowerCase().includes('discover') ||
+      p.name.toLowerCase().includes('weekly') ||
+      p.name.toLowerCase().includes('daily') ||
+      p.name.toLowerCase().includes('mix')
+    );
+    console.log(`Debug: Found ${discoverPlaylists.length} playlists with discover/weekly/daily/mix in name:`);
+    discoverPlaylists.forEach(p => console.log(`  - ${p.name} (${p.id}) - Owner: ${p.owner?.display_name}`));
+
+    // Look for our target playlist in ALL user's playlists
+    const targetPlaylist = allPlaylists.find(playlist => playlist.id === id);
+
+    if (!targetPlaylist) {
+      console.log(`Debug: Target playlist ${id} NOT found in user playlists`);
+      return res.json({
         success: false,
+        method: 'playlist_not_followed',
         contextUri: contextUri,
         playlistId: id,
-        httpStatus: response.status,
-        errorText: errorText,
-        message: 'Failed to get playlist tracks - this might be a generated playlist'
+        message: 'Generated playlist not found in user playlists. User needs to follow/save this playlist first.',
+        totalUserPlaylists: allPlaylists.length,
+        userPlaylistIds: allPlaylists.map(p => p.id).slice(0, 10) // First 10 for debugging
+      });
+    }
+
+    // Found the playlist in user's playlists - now try to get its tracks
+    console.log(`Debug: Found playlist in user playlists! Name: "${targetPlaylist.name}"`);
+    console.log(`Debug: Playlist owner: ${targetPlaylist.owner?.display_name || 'unknown'}`);
+    console.log(`Debug: Getting tracks for followed playlist...`);
+
+    const followedPlaylistUrl = `https://api.spotify.com/v1/playlists/${id}/tracks?limit=50&offset=0&fields=items(track(id,uri,name,artists(name),duration_ms)),total`;
+    console.log(`Debug: Fetching tracks from: ${followedPlaylistUrl}`);
+
+    const followedResponse = await fetch(followedPlaylistUrl, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': 'application/json'
+      }
+    });
+
+    console.log(`Debug: Followed playlist tracks response status: ${followedResponse.status}`);
+
+    if (followedResponse.ok) {
+      const data = await followedResponse.json();
+      const tracks = data.items
+        .filter(item => item.track && item.track.type === 'track')
+        .map(item => ({
+          id: item.track.id,
+          uri: item.track.uri,
+          name: item.track.name,
+          artists: item.track.artists.map(a => a.name).join(', '),
+          duration_ms: item.track.duration_ms
+        }));
+
+      return res.json({
+        success: true,
+        method: 'followed_playlist_access',
+        contextUri: contextUri,
+        playlistId: id,
+        playlistName: targetPlaylist.name,
+        totalTracks: data.total,
+        tracksRetrieved: tracks.length,
+        tracks: tracks
+      });
+    } else {
+      const errorText = await followedResponse.text();
+      return res.json({
+        success: false,
+        method: 'followed_playlist_access_failed',
+        contextUri: contextUri,
+        playlistId: id,
+        playlistName: targetPlaylist.name,
+        httpStatus: followedResponse.status,
+        errorText: errorText
       });
     }
 
   } catch (error) {
     console.error('Debug: Failed to get context tracks:', error);
-    res.status(500).json({ 
-      error: 'Failed to get context tracks', 
-      details: error.message 
+    res.status(500).json({
+      error: 'Failed to get context tracks',
+      details: error.message
     });
   }
 });
