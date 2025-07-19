@@ -450,6 +450,8 @@ app.get('/api/debug/context-tracks', async (req, res) => {
       });
     }
 
+
+
     // Direct access failed - try the "followed playlists" method
     console.log(`Debug: Direct access failed, trying user playlists method...`);
 
@@ -594,6 +596,123 @@ app.get('/api/debug/context-tracks', async (req, res) => {
     res.status(500).json({
       error: 'Failed to get context tracks',
       details: error.message
+    });
+  }
+});
+
+// Experimental debug endpoint for testing different approaches to generated playlists
+app.get('/api/debug/experimental', async (req, res) => {
+  try {
+    if (!spotifyClient.isUserAuthenticated()) {
+      return res.status(401).json({ error: 'Not authenticated with Spotify' });
+    }
+
+    // Get current playback first
+    const currentPlayback = await spotifyClient.getCurrentPlayback();
+    if (!currentPlayback || !currentPlayback.context) {
+      return res.status(400).json({ 
+        error: 'No active playback context found' 
+      });
+    }
+
+    const contextUri = currentPlayback.context.uri;
+    const [, type, id] = contextUri.split(':');
+    
+    if (type !== 'playlist') {
+      return res.status(400).json({
+        error: 'This experimental endpoint only works with playlists',
+        contextType: type,
+        contextUri: contextUri
+      });
+    }
+
+    await spotifyClient.ensureValidToken();
+    const accessToken = spotifyClient.accessToken;
+
+    const experiments = {};
+
+    // Experiment 1: Direct playlist access
+    try {
+      const directUrl = `https://api.spotify.com/v1/playlists/${id}/tracks?limit=10`;
+      const directResponse = await fetch(directUrl, {
+        headers: { 'Authorization': `Bearer ${accessToken}` }
+      });
+      experiments.direct_access = {
+        url: directUrl,
+        status: directResponse.status,
+        success: directResponse.ok
+      };
+    } catch (error) {
+      experiments.direct_access = { error: error.message };
+    }
+
+    // Experiment 2: Spotify user approach
+    try {
+      const spotifyUserUrl = `https://api.spotify.com/v1/users/spotify/playlists/${id}/tracks?limit=10`;
+      const spotifyUserResponse = await fetch(spotifyUserUrl, {
+        headers: { 'Authorization': `Bearer ${accessToken}` }
+      });
+      experiments.spotify_user_access = {
+        url: spotifyUserUrl,
+        status: spotifyUserResponse.status,
+        success: spotifyUserResponse.ok
+      };
+    } catch (error) {
+      experiments.spotify_user_access = { error: error.message };
+    }
+
+    // Experiment 3: Try different user IDs (maybe not always "spotify")
+    const userIds = ['spotify', 'spotifyofficial', 'spotify-official'];
+    experiments.different_user_ids = {};
+    
+    for (const userId of userIds) {
+      try {
+        const userUrl = `https://api.spotify.com/v1/users/${userId}/playlists/${id}/tracks?limit=5`;
+        const userResponse = await fetch(userUrl, {
+          headers: { 'Authorization': `Bearer ${accessToken}` }
+        });
+        experiments.different_user_ids[userId] = {
+          url: userUrl,
+          status: userResponse.status,
+          success: userResponse.ok
+        };
+      } catch (error) {
+        experiments.different_user_ids[userId] = { error: error.message };
+      }
+    }
+
+    // Experiment 4: Try getting playlist info (not tracks)
+    try {
+      const playlistInfoUrl = `https://api.spotify.com/v1/playlists/${id}`;
+      const playlistInfoResponse = await fetch(playlistInfoUrl, {
+        headers: { 'Authorization': `Bearer ${accessToken}` }
+      });
+      experiments.playlist_info = {
+        url: playlistInfoUrl,
+        status: playlistInfoResponse.status,
+        success: playlistInfoResponse.ok
+      };
+      if (playlistInfoResponse.ok) {
+        const data = await playlistInfoResponse.json();
+        experiments.playlist_info.owner = data.owner?.id;
+        experiments.playlist_info.name = data.name;
+      }
+    } catch (error) {
+      experiments.playlist_info = { error: error.message };
+    }
+
+    res.json({
+      message: 'Experimental approaches to generated playlist access',
+      contextUri: contextUri,
+      playlistId: id,
+      experiments: experiments
+    });
+
+  } catch (error) {
+    console.error('Debug: Failed experimental approaches:', error);
+    res.status(500).json({ 
+      error: 'Failed experimental approaches', 
+      details: error.message 
     });
   }
 });
