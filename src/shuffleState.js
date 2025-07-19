@@ -83,16 +83,7 @@ class ShuffleState {
     return this.currentTracks;
   }
 
-  // Stop shuffle management
-  stopShuffle() {
-    this.isActive = false;
-    this.currentContext = null;
-    this.currentTracks = [];
-    this.lastManagedTrack = null;
-    this.lastCheckTime = null;
-    this.stsdPlaylistId = null;
-    console.log('Stopped shuffle management');
-  }
+
 }
 
 module.exports = new ShuffleState();

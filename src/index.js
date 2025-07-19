@@ -274,20 +274,6 @@ app.get('/api/shuffle/start', async (req, res) => {
   }
 });
 
-// Stop shuffle endpoint
-app.get('/api/shuffle/stop', async (req, res) => {
-  try {
-    if (shuffleState.isActive) {
-      shuffleState.stopShuffle();
-      res.json({ message: 'Shuffle stopped successfully' });
-    } else {
-      res.json({ message: 'No active shuffle to stop' });
-    }
-  } catch (error) {
-    console.error('Failed to stop shuffle:', error);
-    res.status(500).json({ error: 'Failed to stop shuffle', details: error.message });
-  }
-});
 
 // Debug endpoint to check current playback
 app.get('/api/debug/current-playback', async (req, res) => {
