@@ -294,6 +294,101 @@ app.get('/api/debug/current-playback', async (req, res) => {
   }
 });
 
+// Debug endpoint to try getting current context tracks manually
+app.get('/api/debug/context-tracks', async (req, res) => {
+  try {
+    if (!spotifyClient.isUserAuthenticated()) {
+      return res.status(401).json({ error: 'Not authenticated with Spotify' });
+    }
+
+    // Get current playback first
+    const currentPlayback = await spotifyClient.getCurrentPlayback();
+    if (!currentPlayback || !currentPlayback.context) {
+      return res.status(400).json({ 
+        error: 'No active playback context found' 
+      });
+    }
+
+    const contextUri = currentPlayback.context.uri;
+    console.log(`Debug: Trying to get tracks for context: ${contextUri}`);
+
+    // Parse context URI to get type and ID
+    const [, type, id] = contextUri.split(':');
+    
+    if (type !== 'playlist') {
+      return res.status(400).json({
+        error: 'This debug endpoint only works with playlists',
+        contextType: type,
+        contextUri: contextUri
+      });
+    }
+
+    // Make manual HTTP request to Spotify API
+    await spotifyClient.ensureValidToken();
+    const accessToken = spotifyClient.accessToken;
+
+    // Build the request URL - get first 50 tracks
+    const url = `https://api.spotify.com/v1/playlists/${id}/tracks?limit=50&offset=0&fields=items(track(id,uri,name,artists(name),duration_ms)),total`;
+
+    console.log(`Debug: Making request to: ${url}`);
+
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': 'application/json'
+      }
+    });
+
+    console.log(`Debug: Response status: ${response.status}`);
+
+    if (response.ok) {
+      const data = await response.json();
+      
+      // Extract track info
+      const tracks = data.items
+        .filter(item => item.track && item.track.type === 'track')
+        .map(item => ({
+          id: item.track.id,
+          uri: item.track.uri,
+          name: item.track.name,
+          artists: item.track.artists.map(a => a.name).join(', '),
+          duration_ms: item.track.duration_ms
+        }));
+
+      res.json({
+        success: true,
+        contextUri: contextUri,
+        playlistId: id,
+        totalTracks: data.total,
+        tracksRetrieved: tracks.length,
+        tracks: tracks,
+        rawResponse: data // Include raw response for debugging
+      });
+
+    } else {
+      const errorText = await response.text();
+      console.log(`Debug: Error response: ${errorText}`);
+      
+      res.json({
+        success: false,
+        contextUri: contextUri,
+        playlistId: id,
+        httpStatus: response.status,
+        errorText: errorText,
+        message: 'Failed to get playlist tracks - this might be a generated playlist'
+      });
+    }
+
+  } catch (error) {
+    console.error('Debug: Failed to get context tracks:', error);
+    res.status(500).json({ 
+      error: 'Failed to get context tracks', 
+      details: error.message 
+    });
+  }
+});
+
 // Background queue monitoring - runs every 20 seconds
 const queueMonitoringInterval = setInterval(async () => {
   console.log('=== Queue monitoring check started ===');

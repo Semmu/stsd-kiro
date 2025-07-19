@@ -398,7 +398,7 @@ class SpotifyClient {
 
         try {
             await this.ensureValidToken();
-            
+
             // Use direct HTTP API call instead of SDK due to JSON parsing issues
             const url = new URL('https://api.spotify.com/v1/me/player/queue');
             url.searchParams.append('uri', trackUri);
@@ -802,7 +802,7 @@ class SpotifyClient {
 
         try {
             await this.ensureValidToken();
-            
+
             // Use direct HTTP API call for queue
             const response = await fetch('https://api.spotify.com/v1/me/player/queue', {
                 method: 'GET',
