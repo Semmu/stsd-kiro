@@ -111,6 +111,31 @@ class Database {
         });
     }
 
+    // Get only tracks with the minimum play count for a context (for random selection)
+    async getLeastPlayedTracks(contextId) {
+        return new Promise((resolve, reject) => {
+            const sql = `
+        SELECT track_id, play_count, last_played 
+        FROM play_counts 
+        WHERE context_id = ? 
+        AND play_count = (
+          SELECT MIN(play_count) 
+          FROM play_counts 
+          WHERE context_id = ?
+        )
+        ORDER BY last_played ASC
+      `;
+
+            this.db.all(sql, [contextId, contextId], (err, rows) => {
+                if (err) {
+                    reject(err);
+                } else {
+                    resolve(rows);
+                }
+            });
+        });
+    }
+
     // Get recently added tracks (most recent last_played timestamps)
     // These are the tracks we added to queue recently
     async getRecentlyAddedTracks(contextId, limit = 10) {

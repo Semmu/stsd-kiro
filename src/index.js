@@ -10,24 +10,29 @@ const PORT = process.env.PORT || 3000;
 // Configuration
 const PLAYLIST_TARGET_SIZE = parseInt(process.env.PLAYLIST_TARGET_SIZE) || 5;
 
+// Helper function to randomly select from an array
+function getRandomElement(array) {
+  return array[Math.floor(Math.random() * array.length)];
+}
+
 // Atomic function to add one least-played track to STSD playlist
 async function addOneLeastPlayedTrack(contextUri, allTracks, playlistId = null) {
   try {
-    // Get current least-played tracks from database
-    const playCountData = await database.getContextPlayCounts(contextUri);
+    // Get tracks with the minimum play count for random selection
+    const leastPlayedTracks = await database.getLeastPlayedTracks(contextUri);
 
-    if (playCountData.length === 0) {
+    if (leastPlayedTracks.length === 0) {
       console.log('No tracks available to add');
       return false;
     }
 
-    // Get the absolute least-played track (first in sorted list)
-    const leastPlayedTrack = playCountData[0];
+    // Randomly select from tracks with the lowest play count
+    const selectedTrack = getRandomElement(leastPlayedTracks);
 
     // Find the full track info
-    const fullTrackInfo = allTracks.find(track => track.uri === leastPlayedTrack.track_id);
+    const fullTrackInfo = allTracks.find(track => track.uri === selectedTrack.track_id);
     if (!fullTrackInfo) {
-      console.log(`Could not find full track info for ${leastPlayedTrack.track_id}`);
+      console.log(`Could not find full track info for ${selectedTrack.track_id}`);
       return false;
     }
 
@@ -39,18 +44,18 @@ async function addOneLeastPlayedTrack(contextUri, allTracks, playlistId = null) 
     }
 
     // Add the track to the playlist
-    await spotifyClient.addToPlaylist(stsdPlaylistId, [leastPlayedTrack.track_id]);
+    await spotifyClient.addToPlaylist(stsdPlaylistId, [selectedTrack.track_id]);
 
     await new Promise(resolve => setTimeout(resolve, 500)); // Safety delay after playlist addition
 
     // Increment play count immediately so next query won't select the same track
-    await database.incrementPlayCount(contextUri, leastPlayedTrack.track_id);
+    await database.incrementPlayCount(contextUri, selectedTrack.track_id);
 
-    console.log(`Added least-played track: ${fullTrackInfo.name} by ${fullTrackInfo.artists} (played ${leastPlayedTrack.play_count} times, now ${leastPlayedTrack.play_count + 1})`);
+    console.log(`Added least-played track: ${fullTrackInfo.name} by ${fullTrackInfo.artists} (played ${selectedTrack.play_count} times, now ${selectedTrack.play_count + 1}) [randomly selected from ${leastPlayedTracks.length} least-played tracks]`);
 
     return {
       success: true,
-      trackUri: leastPlayedTrack.track_id,
+      trackUri: selectedTrack.track_id,
       trackInfo: fullTrackInfo
     };
   } catch (error) {
@@ -219,31 +224,31 @@ app.get('/api/shuffle/start', async (req, res) => {
       await new Promise(resolve => setTimeout(resolve, 1500));
 
       try {
-        // Get current least-played tracks from database
-        const playCountData = await database.getContextPlayCounts(contextUri);
+        // Get tracks with the minimum play count for random selection
+        const leastPlayedTracks = await database.getLeastPlayedTracks(contextUri);
 
-        if (playCountData.length === 0) {
+        if (leastPlayedTracks.length === 0) {
           console.log('No more tracks available for queue');
           break;
         }
 
-        // Get the absolute least-played track (first in sorted list)
-        const leastPlayedTrack = playCountData[0];
+        // Randomly select from tracks with the lowest play count
+        const selectedTrack = getRandomElement(leastPlayedTracks);
 
         // Find the full track info
-        const fullTrackInfo = contextData.tracks.find(track => track.uri === leastPlayedTrack.track_id);
+        const fullTrackInfo = contextData.tracks.find(track => track.uri === selectedTrack.track_id);
         if (!fullTrackInfo) {
-          console.log(`Could not find full track info for ${leastPlayedTrack.track_id}`);
+          console.log(`Could not find full track info for ${selectedTrack.track_id}`);
           continue;
         }
 
         // Add to queue
-        await spotifyClient.addToQueue(leastPlayedTrack.track_id);
+        await spotifyClient.addToQueue(selectedTrack.track_id);
 
         // Increment play count since we're queuing it (this marks it as recently added)
-        await database.incrementPlayCount(contextUri, leastPlayedTrack.track_id);
+        await database.incrementPlayCount(contextUri, selectedTrack.track_id);
 
-        console.log(`Added to queue (${i + 2}/${PLAYLIST_TARGET_SIZE}): ${fullTrackInfo.name} by ${fullTrackInfo.artists} (played ${leastPlayedTrack.play_count} times, now ${leastPlayedTrack.play_count + 1})`);
+        console.log(`Added to queue (${i + 2}/${PLAYLIST_TARGET_SIZE}): ${fullTrackInfo.name} by ${fullTrackInfo.artists} (played ${selectedTrack.play_count} times, now ${selectedTrack.play_count + 1}) [randomly selected from ${leastPlayedTracks.length} least-played tracks]`);
 
       } catch (error) {
         console.error(`Failed to add track ${i + 2} to queue:`, error);
@@ -610,14 +615,14 @@ app.get('/api/debug/experimental', async (req, res) => {
     // Get current playback first
     const currentPlayback = await spotifyClient.getCurrentPlayback();
     if (!currentPlayback || !currentPlayback.context) {
-      return res.status(400).json({ 
-        error: 'No active playback context found' 
+      return res.status(400).json({
+        error: 'No active playback context found'
       });
     }
 
     const contextUri = currentPlayback.context.uri;
     const [, type, id] = contextUri.split(':');
-    
+
     if (type !== 'playlist') {
       return res.status(400).json({
         error: 'This experimental endpoint only works with playlists',
@@ -664,7 +669,7 @@ app.get('/api/debug/experimental', async (req, res) => {
     // Experiment 3: Try different user IDs (maybe not always "spotify")
     const userIds = ['spotify', 'spotifyofficial', 'spotify-official'];
     experiments.different_user_ids = {};
-    
+
     for (const userId of userIds) {
       try {
         const userUrl = `https://api.spotify.com/v1/users/${userId}/playlists/${id}/tracks?limit=5`;
@@ -710,9 +715,9 @@ app.get('/api/debug/experimental', async (req, res) => {
 
   } catch (error) {
     console.error('Debug: Failed experimental approaches:', error);
-    res.status(500).json({ 
-      error: 'Failed experimental approaches', 
-      details: error.message 
+    res.status(500).json({
+      error: 'Failed experimental approaches',
+      details: error.message
     });
   }
 });
@@ -786,31 +791,31 @@ const queueMonitoringInterval = setInterval(async () => {
 
       for (let i = 0; i < tracksNeeded; i++) {
         try {
-          // Get current least-played tracks from database
-          const playCountData = await database.getContextPlayCounts(shuffleState.currentContext);
+          // Get tracks with the minimum play count for random selection
+          const leastPlayedTracks = await database.getLeastPlayedTracks(shuffleState.currentContext);
 
-          if (playCountData.length === 0) {
+          if (leastPlayedTracks.length === 0) {
             console.log('No more tracks available for queue');
             break;
           }
 
-          // Get the absolute least-played track
-          const leastPlayedTrack = playCountData[0];
+          // Randomly select from tracks with the lowest play count
+          const selectedTrack = getRandomElement(leastPlayedTracks);
 
           // Find the full track info
-          const fullTrackInfo = shuffleState.getAllTracks().find(track => track.uri === leastPlayedTrack.track_id);
+          const fullTrackInfo = shuffleState.getAllTracks().find(track => track.uri === selectedTrack.track_id);
           if (!fullTrackInfo) {
-            console.log(`Could not find full track info for ${leastPlayedTrack.track_id}`);
+            console.log(`Could not find full track info for ${selectedTrack.track_id}`);
             continue;
           }
 
           // Add to queue
-          await spotifyClient.addToQueue(leastPlayedTrack.track_id);
+          await spotifyClient.addToQueue(selectedTrack.track_id);
 
           // Increment play count (this marks it as recently added)
-          await database.incrementPlayCount(shuffleState.currentContext, leastPlayedTrack.track_id);
+          await database.incrementPlayCount(shuffleState.currentContext, selectedTrack.track_id);
 
-          console.log(`Added to queue: ${fullTrackInfo.name} by ${fullTrackInfo.artists} (played ${leastPlayedTrack.play_count} times, now ${leastPlayedTrack.play_count + 1})`);
+          console.log(`Added to queue: ${fullTrackInfo.name} by ${fullTrackInfo.artists} (played ${selectedTrack.play_count} times, now ${selectedTrack.play_count + 1}) [randomly selected from ${leastPlayedTracks.length} least-played tracks]`);
 
           // Delay between additions
           if (i < tracksNeeded - 1) {
