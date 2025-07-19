@@ -294,6 +294,92 @@ app.get('/api/debug/current-playback', async (req, res) => {
   }
 });
 
+// Debug endpoint to test new scopes and library access
+app.get('/api/debug/library-access', async (req, res) => {
+  try {
+    if (!spotifyClient.isUserAuthenticated()) {
+      return res.status(401).json({ error: 'Not authenticated with Spotify' });
+    }
+
+    await spotifyClient.ensureValidToken();
+    const accessToken = spotifyClient.accessToken;
+
+    const results = {};
+
+    // Test user's saved tracks
+    try {
+      const savedTracksUrl = `https://api.spotify.com/v1/me/tracks?limit=10`;
+      const savedTracksResponse = await fetch(savedTracksUrl, {
+        headers: { 'Authorization': `Bearer ${accessToken}` }
+      });
+      results.savedTracks = {
+        status: savedTracksResponse.status,
+        success: savedTracksResponse.ok,
+        count: savedTracksResponse.ok ? (await savedTracksResponse.json()).items.length : 0
+      };
+    } catch (error) {
+      results.savedTracks = { error: error.message };
+    }
+
+    // Test user's saved albums
+    try {
+      const savedAlbumsUrl = `https://api.spotify.com/v1/me/albums?limit=10`;
+      const savedAlbumsResponse = await fetch(savedAlbumsUrl, {
+        headers: { 'Authorization': `Bearer ${accessToken}` }
+      });
+      results.savedAlbums = {
+        status: savedAlbumsResponse.status,
+        success: savedAlbumsResponse.ok,
+        count: savedAlbumsResponse.ok ? (await savedAlbumsResponse.json()).items.length : 0
+      };
+    } catch (error) {
+      results.savedAlbums = { error: error.message };
+    }
+
+    // Test followed artists
+    try {
+      const followedArtistsUrl = `https://api.spotify.com/v1/me/following?type=artist&limit=10`;
+      const followedArtistsResponse = await fetch(followedArtistsUrl, {
+        headers: { 'Authorization': `Bearer ${accessToken}` }
+      });
+      results.followedArtists = {
+        status: followedArtistsResponse.status,
+        success: followedArtistsResponse.ok,
+        count: followedArtistsResponse.ok ? (await followedArtistsResponse.json()).artists.items.length : 0
+      };
+    } catch (error) {
+      results.followedArtists = { error: error.message };
+    }
+
+    // Test recently played
+    try {
+      const recentlyPlayedUrl = `https://api.spotify.com/v1/me/player/recently-played?limit=10`;
+      const recentlyPlayedResponse = await fetch(recentlyPlayedUrl, {
+        headers: { 'Authorization': `Bearer ${accessToken}` }
+      });
+      results.recentlyPlayed = {
+        status: recentlyPlayedResponse.status,
+        success: recentlyPlayedResponse.ok,
+        count: recentlyPlayedResponse.ok ? (await recentlyPlayedResponse.json()).items.length : 0
+      };
+    } catch (error) {
+      results.recentlyPlayed = { error: error.message };
+    }
+
+    res.json({
+      message: 'Testing new scopes access',
+      results: results
+    });
+
+  } catch (error) {
+    console.error('Debug: Failed to test library access:', error);
+    res.status(500).json({
+      error: 'Failed to test library access',
+      details: error.message
+    });
+  }
+});
+
 // Debug endpoint to try getting current context tracks manually
 app.get('/api/debug/context-tracks', async (req, res) => {
   try {

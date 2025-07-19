@@ -144,13 +144,29 @@ class SpotifyClient {
     // Get authorization URL for user login
     getAuthUrl() {
         const scopes = [
+            // Playback control
             'user-read-playback-state',
             'user-modify-playback-state',
             'user-read-currently-playing',
+            'streaming',
+            
+            // Playlist access
             'playlist-read-private',
             'playlist-read-collaborative',
             'playlist-modify-private',
-            'playlist-modify-public'
+            'playlist-modify-public',
+            
+            // User library and follows
+            'user-library-read',
+            'user-library-modify',
+            'user-follow-read',
+            'user-follow-modify',
+            
+            // User data
+            'user-read-private',
+            'user-read-email',
+            'user-top-read',
+            'user-read-recently-played'
         ];
 
         const params = new URLSearchParams({
