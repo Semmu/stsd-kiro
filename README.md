@@ -1,5 +1,20 @@
 # STSD - Spotify True Shuffle Daemon
 
+> **⚠️ AI EXPERIMENT WARNING**
+> 
+> This entire project was created using Kiro, an AI coding assistant. I (the project owner) did not write any code by hand or execute any git commands manually. This is an experiment in AI-driven development to see how far autonomous coding agents can go.
+> 
+> **Personal context:** I recently broke my left arm, which significantly limits my ability to code effectively. This physical limitation motivated me to explore AI coding assistants as a way to continue building projects while recovering.
+> 
+> **What this means for you as a developer:**
+> - The code architecture and implementation decisions were made by AI
+> - All git history reflects AI commits, not human commits
+> - Code quality, patterns, and conventions are AI-generated
+> - This is not a reflection of human coding standards or practices
+> - Use this project as a reference for AI capabilities, not as a coding example
+> 
+> If you're interested in AI-assisted development or want to see what's possible with modern coding agents, this project serves as a real-world case study. The functionality works, but approach the codebase with the understanding that it's an AI experiment.
+
 A self-hosted daemon that implements true shuffle for Spotify playlists, ensuring even distribution of tracks across large playlists.
 
 ## Why?
