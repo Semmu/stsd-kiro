@@ -6,6 +6,7 @@ class ShuffleState {
     this.lastManagedTrack = null;
     this.lastCheckTime = null;
     this.stsdPlaylistId = null;
+    this.initialTrackUri = null; // Track the initial track we start the playlist with
   }
 
   // Start managing a context
@@ -15,6 +16,7 @@ class ShuffleState {
     this.currentTracks = tracks;
     this.lastManagedTrack = null;
     this.lastCheckTime = Date.now();
+    this.initialTrackUri = null; // Reset initial track
     
     console.log(`Started managing shuffle for ${contextUri} with ${tracks.length} tracks`);
   }
@@ -81,6 +83,17 @@ class ShuffleState {
   // Get all tracks from current context
   getAllTracks() {
     return this.currentTracks;
+  }
+
+  // Set the initial track URI that we start the playlist with
+  setInitialTrack(trackUri) {
+    this.initialTrackUri = trackUri;
+    console.log(`Set initial track for queue filtering: ${trackUri}`);
+  }
+
+  // Get the initial track URI
+  getInitialTrack() {
+    return this.initialTrackUri;
   }
 
 

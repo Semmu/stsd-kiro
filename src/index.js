@@ -188,6 +188,10 @@ app.get('/api/shuffle/start', async (req, res) => {
     const originalContextName = `${contextData.type} ${contextData.id}`;
     const stsdPlaylistId = await spotifyClient.createFreshSTSDPlaylist(originalContextName);
 
+    // Start managing this context first (before setting initial track)
+    shuffleState.startShuffle(contextUri, contextData.tracks);
+    shuffleState.setStsdPlaylistId(stsdPlaylistId);
+
     // Add one single least-played track to the fresh playlist
     console.log('Adding one least-played track to fresh playlist...');
     const trackResult = await addOneLeastPlayedTrack(contextUri, contextData.tracks, stsdPlaylistId);
@@ -198,6 +202,9 @@ app.get('/api/shuffle/start', async (req, res) => {
     }
 
     console.log(`Added track: ${trackResult.trackInfo.name} by ${trackResult.trackInfo.artists}`);
+
+    // Store the initial track URI for queue filtering
+    shuffleState.setInitialTrack(trackResult.trackUri);
 
     // Wait for API consistency
     console.log('Waiting for playlist to sync...');
@@ -257,10 +264,6 @@ app.get('/api/shuffle/start', async (req, res) => {
     }
 
     console.log('Queue population complete!');
-
-    // Start managing this context
-    shuffleState.startShuffle(contextUri, contextData.tracks);
-    shuffleState.setStsdPlaylistId(stsdPlaylistId);
 
     res.json({
       message: 'Shuffle started successfully',
@@ -771,14 +774,53 @@ const queueMonitoringInterval = setInterval(async () => {
     // Extract track URIs from the queue
     const currentQueueUris = queueData.queue.map(item => item.uri);
 
+    // Filter out the initial track duplicates from the queue (Spotify API bug)
+    const initialTrackUri = shuffleState.getInitialTrack();
+    const filteredQueue = [];
+    let duplicatesRemoved = 0;
+
+    if (initialTrackUri) {
+      for (const item of queueData.queue) {
+        if (item.uri === initialTrackUri) {
+          // Filter out ALL occurrences of the initial track since it's already in the playlist
+          const artists = item.artists ? item.artists.map(a => a.name).join(', ') : 'Unknown Artist';
+          console.log(`Filtering out initial track duplicate: ${item.name} by ${artists}`);
+          duplicatesRemoved++;
+        } else {
+          // Keep all other tracks
+          filteredQueue.push(item);
+        }
+      }
+    } else {
+      // No initial track to filter, keep all items
+      filteredQueue.push(...queueData.queue);
+    }
+
+    const filteredQueueUris = filteredQueue.map(item => item.uri);
+    console.log(`Raw queue: ${currentQueueUris.length} items, Filtered queue: ${filteredQueueUris.length} items (removed ${duplicatesRemoved} initial track duplicates)`);
+
+    // Print detailed queue contents for debugging
+    console.log(`\n=== DETAILED QUEUE CONTENTS (${currentQueueUris.length} raw items, ${filteredQueueUris.length} unique items) ===`);
+    queueData.queue.forEach((item, index) => {
+      const artists = item.artists ? item.artists.map(a => a.name).join(', ') : 'Unknown Artist';
+      console.log(`${index + 1}. ${item.name} by ${artists}`);
+      console.log(`   URI: ${item.uri}`);
+      console.log(`   Type: ${item.type}, Duration: ${item.duration_ms}ms`);
+      if (item.album) {
+        console.log(`   Album: ${item.album.name}`);
+      }
+      console.log('');
+    });
+    console.log('=== END QUEUE CONTENTS ===\n');
+
     // Get recently added tracks from database (these are likely our managed tracks)
     const recentlyAdded = await database.getRecentlyAddedTracks(shuffleState.currentContext, 10);
     const recentlyAddedUris = recentlyAdded.map(track => track.track_id);
 
-    console.log(`Current queue has ${currentQueueUris.length} tracks, recently added ${recentlyAddedUris.length} tracks`);
+    console.log(`Current queue has ${filteredQueueUris.length} unique tracks (${currentQueueUris.length} raw), recently added ${recentlyAddedUris.length} tracks`);
 
-    // Check which of our recently added tracks are still in the queue
-    const stillInQueue = recentlyAddedUris.filter(uri => currentQueueUris.includes(uri));
+    // Check which of our recently added tracks are still in the queue (use filtered queue)
+    const stillInQueue = recentlyAddedUris.filter(uri => filteredQueueUris.includes(uri));
 
     console.log(`${stillInQueue.length}/${recentlyAddedUris.length} recently added tracks still in queue`);
 
