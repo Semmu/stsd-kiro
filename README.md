@@ -37,7 +37,8 @@ Spotify's built-in shuffle algorithm is notoriously bad - it doesn't truly shuff
    - Go to [Spotify Developer Dashboard](https://developer.spotify.com/dashboard)
    - Create a new app
    - Note your Client ID and Client Secret
-   - Add `http://localhost:3000/auth/callback` to your app's redirect URIs
+   - Add `http://127.0.0.1:3000/auth/callback` to your app's redirect URIs
+     - **Note**: Use `127.0.0.1` instead of `localhost` - Spotify is migrating away from localhost URLs for security reasons
 
 2. **Spotify Premium**: Required for controlling playback via API
 
