@@ -30,6 +30,18 @@ Spotify's built-in shuffle algorithm is notoriously bad - it doesn't truly shuff
 - ✅ Simple HTTP API for control
 - ✅ Self-hosted and open-source
 
+## ⚠️ Current Limitations
+
+**Only works with user-created playlists and albums** - STSD cannot shuffle Spotify-generated content like:
+- Discover Weekly
+- Daily Mix playlists
+- Song Radio
+- Artist Radio
+- Spotify's algorithmic playlists
+- Release Radar
+- Made For You playlists
+
+This is due to Spotify API restrictions on accessing tracks from algorithmically generated playlists. You'll need to start playing a regular user-created playlist or album before calling `/api/shuffle/start`.
 
 ## Prerequisites
 
