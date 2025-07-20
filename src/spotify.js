@@ -840,6 +840,58 @@ class SpotifyClient {
         }
     }
 
+    // Get Client Credentials token (server-to-server, no user auth)
+    async getClientCredentialsToken() {
+        try {
+            const credentials = Buffer.from(`${process.env.SPOTIFY_CLIENT_ID}:${process.env.SPOTIFY_CLIENT_SECRET}`).toString('base64');
+            
+            const response = await fetch('https://accounts.spotify.com/api/token', {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Basic ${credentials}`,
+                    'Content-Type': 'application/x-www-form-urlencoded'
+                },
+                body: 'grant_type=client_credentials'
+            });
+
+            if (response.ok) {
+                const data = await response.json();
+                console.log('Client Credentials token obtained successfully');
+                return data.access_token;
+            } else {
+                const errorText = await response.text();
+                throw new Error(`Failed to get client credentials token: ${response.status} ${errorText}`);
+            }
+        } catch (error) {
+            console.error('Client credentials authentication failed:', error);
+            throw error;
+        }
+    }
+
+    // Make API call with Client Credentials token
+    async fetchWithClientCredentials(url) {
+        try {
+            const token = await this.getClientCredentialsToken();
+            
+            const response = await fetch(url, {
+                method: 'GET',
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json'
+                }
+            });
+
+            return {
+                status: response.status,
+                ok: response.ok,
+                data: response.ok ? await response.json() : await response.text()
+            };
+        } catch (error) {
+            console.error('Client credentials API call failed:', error);
+            throw error;
+        }
+    }
+
     // Check if user is authenticated
     isUserAuthenticated() {
         return this.isAuthenticated;

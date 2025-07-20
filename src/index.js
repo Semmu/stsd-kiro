@@ -725,6 +725,290 @@ app.get('/api/debug/experimental', async (req, res) => {
   }
 });
 
+// Debug endpoint to test Client Credentials Flow access to generated playlists
+app.get('/api/debug/client-credentials', async (req, res) => {
+  try {
+    // Get current playback first (requires user auth)
+    if (!spotifyClient.isUserAuthenticated()) {
+      return res.status(401).json({ error: 'Need user authentication to get current context' });
+    }
+
+    const currentPlayback = await spotifyClient.getCurrentPlayback();
+    if (!currentPlayback || !currentPlayback.context) {
+      return res.status(400).json({
+        error: 'No active playback context found'
+      });
+    }
+
+    const contextUri = currentPlayback.context.uri;
+    const [, type, id] = contextUri.split(':');
+
+    if (type !== 'playlist') {
+      return res.status(400).json({
+        error: 'This endpoint only works with playlists',
+        contextType: type,
+        contextUri: contextUri
+      });
+    }
+
+    console.log(`Debug: Testing Client Credentials access for playlist: ${contextUri}`);
+
+    const experiments = {};
+
+    // Experiment 1: Direct playlist access with Client Credentials
+    try {
+      const directUrl = `https://api.spotify.com/v1/playlists/${id}`;
+      console.log(`Debug: Client Credentials - trying playlist info: ${directUrl}`);
+
+      const result = await spotifyClient.fetchWithClientCredentials(directUrl);
+      console.log(`Debug: Playlist info response - Status: ${result.status}, Success: ${result.ok}`);
+
+      if (result.ok) {
+        console.log(`Debug: Playlist info SUCCESS - Name: "${result.data.name}", Owner: ${result.data.owner?.id}, Public: ${result.data.public}, Tracks: ${result.data.tracks?.total}`);
+      } else {
+        console.log(`Debug: Playlist info FAILED - Error: ${JSON.stringify(result.data)}`);
+      }
+
+      experiments.playlist_info = {
+        url: directUrl,
+        status: result.status,
+        success: result.ok,
+        data: result.ok ? {
+          name: result.data.name,
+          owner: result.data.owner?.id,
+          public: result.data.public,
+          tracks_total: result.data.tracks?.total
+        } : result.data
+      };
+    } catch (error) {
+      console.log(`Debug: Playlist info EXCEPTION - ${error.message}`);
+      experiments.playlist_info = { error: error.message };
+    }
+
+    // Experiment 2: Playlist tracks with Client Credentials
+    try {
+      const tracksUrl = `https://api.spotify.com/v1/playlists/${id}/tracks?limit=10`;
+      console.log(`Debug: Client Credentials - trying playlist tracks: ${tracksUrl}`);
+
+      const result = await spotifyClient.fetchWithClientCredentials(tracksUrl);
+      console.log(`Debug: Playlist tracks response - Status: ${result.status}, Success: ${result.ok}`);
+
+      if (result.ok) {
+        console.log(`Debug: Playlist tracks SUCCESS - Total: ${result.data.total}, Retrieved: ${result.data.items?.length || 0}, First track: "${result.data.items?.[0]?.track?.name || 'none'}"`);
+      } else {
+        console.log(`Debug: Playlist tracks FAILED - Error: ${JSON.stringify(result.data)}`);
+      }
+
+      experiments.playlist_tracks = {
+        url: tracksUrl,
+        status: result.status,
+        success: result.ok,
+        data: result.ok ? {
+          total: result.data.total,
+          tracks_count: result.data.items?.length || 0,
+          first_track: result.data.items?.[0]?.track?.name || null
+        } : result.data
+      };
+    } catch (error) {
+      console.log(`Debug: Playlist tracks EXCEPTION - ${error.message}`);
+      experiments.playlist_tracks = { error: error.message };
+    }
+
+    // Experiment 3: Try accessing via users/{user_id}/playlists approach
+    if (experiments.playlist_info?.success && experiments.playlist_info.data.owner) {
+      try {
+        const userId = experiments.playlist_info.data.owner;
+        const userPlaylistsUrl = `https://api.spotify.com/v1/users/${userId}/playlists?limit=50`;
+        console.log(`Debug: Client Credentials - trying user playlists: ${userPlaylistsUrl}`);
+
+        const result = await spotifyClient.fetchWithClientCredentials(userPlaylistsUrl);
+        console.log(`Debug: User playlists response - Status: ${result.status}, Success: ${result.ok}`);
+
+        if (result.ok) {
+          const targetPlaylist = result.data.items?.find(p => p.id === id);
+          console.log(`Debug: User playlists SUCCESS - Total playlists: ${result.data.items?.length || 0}, Target found: ${!!targetPlaylist}, Target name: "${targetPlaylist?.name || 'not found'}"`);
+
+          experiments.user_playlists_access = {
+            url: userPlaylistsUrl,
+            status: result.status,
+            success: result.ok,
+            total_playlists: result.data.items?.length || 0,
+            target_playlist_found: !!targetPlaylist,
+            target_playlist_name: targetPlaylist?.name || null
+          };
+        } else {
+          console.log(`Debug: User playlists FAILED - Error: ${JSON.stringify(result.data)}`);
+          experiments.user_playlists_access = {
+            url: userPlaylistsUrl,
+            status: result.status,
+            success: false,
+            data: result.data
+          };
+        }
+      } catch (error) {
+        console.log(`Debug: User playlists EXCEPTION - ${error.message}`);
+        experiments.user_playlists_access = { error: error.message };
+      }
+    }
+
+    res.json({
+      message: 'Client Credentials Flow experiments for generated playlist access',
+      contextUri: contextUri,
+      playlistId: id,
+      experiments: experiments
+    });
+
+  } catch (error) {
+    console.error('Debug: Failed Client Credentials experiments:', error);
+    res.status(500).json({
+      error: 'Failed Client Credentials experiments',
+      details: error.message
+    });
+  }
+});
+
+// Debug endpoint to test with manually provided implicit grant token
+app.get('/api/debug/implicit-token-test', async (req, res) => {
+  try {
+    const { token } = req.query;
+
+    if (!token) {
+      return res.status(400).json({
+        error: 'Missing token parameter',
+        usage: 'Add ?token=YOUR_IMPLICIT_GRANT_TOKEN to the URL'
+      });
+    }
+
+    // Get current playback first (requires user auth)
+    if (!spotifyClient.isUserAuthenticated()) {
+      return res.status(401).json({ error: 'Need user authentication to get current context' });
+    }
+
+    const currentPlayback = await spotifyClient.getCurrentPlayback();
+    if (!currentPlayback || !currentPlayback.context) {
+      return res.status(400).json({
+        error: 'No active playback context found'
+      });
+    }
+
+    const contextUri = currentPlayback.context.uri;
+    const [, type, id] = contextUri.split(':');
+
+    if (type !== 'playlist') {
+      return res.status(400).json({
+        error: 'This endpoint only works with playlists',
+        contextType: type,
+        contextUri: contextUri
+      });
+    }
+
+    console.log(`Debug: Testing implicit grant token for playlist: ${contextUri}`);
+
+    const experiments = {};
+
+    // Test playlist info with implicit grant token
+    try {
+      const directUrl = `https://api.spotify.com/v1/playlists/${id}`;
+      console.log(`Debug: Implicit token - trying playlist info: ${directUrl}`);
+
+      const response = await fetch(directUrl, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        }
+      });
+
+      const result = {
+        status: response.status,
+        ok: response.ok,
+        data: response.ok ? await response.json() : await response.text()
+      };
+
+      console.log(`Debug: Implicit token playlist info - Status: ${result.status}, Success: ${result.ok}`);
+
+      if (result.ok) {
+        console.log(`Debug: Implicit token SUCCESS - Name: "${result.data.name}", Owner: ${result.data.owner?.id}, Public: ${result.data.public}, Tracks: ${result.data.tracks?.total}`);
+      } else {
+        console.log(`Debug: Implicit token FAILED - Error: ${JSON.stringify(result.data)}`);
+      }
+
+      experiments.playlist_info = {
+        url: directUrl,
+        status: result.status,
+        success: result.ok,
+        data: result.ok ? {
+          name: result.data.name,
+          owner: result.data.owner?.id,
+          public: result.data.public,
+          tracks_total: result.data.tracks?.total
+        } : result.data
+      };
+    } catch (error) {
+      console.log(`Debug: Implicit token playlist info EXCEPTION - ${error.message}`);
+      experiments.playlist_info = { error: error.message };
+    }
+
+    // Test playlist tracks with implicit grant token
+    try {
+      const tracksUrl = `https://api.spotify.com/v1/playlists/${id}/tracks?limit=10`;
+      console.log(`Debug: Implicit token - trying playlist tracks: ${tracksUrl}`);
+
+      const response = await fetch(tracksUrl, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        }
+      });
+
+      const result = {
+        status: response.status,
+        ok: response.ok,
+        data: response.ok ? await response.json() : await response.text()
+      };
+
+      console.log(`Debug: Implicit token playlist tracks - Status: ${result.status}, Success: ${result.ok}`);
+
+      if (result.ok) {
+        console.log(`Debug: Implicit token tracks SUCCESS - Total: ${result.data.total}, Retrieved: ${result.data.items?.length || 0}, First track: "${result.data.items?.[0]?.track?.name || 'none'}"`);
+      } else {
+        console.log(`Debug: Implicit token tracks FAILED - Error: ${JSON.stringify(result.data)}`);
+      }
+
+      experiments.playlist_tracks = {
+        url: tracksUrl,
+        status: result.status,
+        success: result.ok,
+        data: result.ok ? {
+          total: result.data.total,
+          tracks_count: result.data.items?.length || 0,
+          first_track: result.data.items?.[0]?.track?.name || null
+        } : result.data
+      };
+    } catch (error) {
+      console.log(`Debug: Implicit token playlist tracks EXCEPTION - ${error.message}`);
+      experiments.playlist_tracks = { error: error.message };
+    }
+
+    res.json({
+      message: 'Implicit Grant Token test for generated playlist access',
+      contextUri: contextUri,
+      playlistId: id,
+      experiments: experiments
+    });
+
+  } catch (error) {
+    console.error('Debug: Failed implicit token test:', error);
+    res.status(500).json({
+      error: 'Failed implicit token test',
+      details: error.message
+    });
+  }
+});
+
 // Background queue monitoring - runs every 20 seconds
 const queueMonitoringInterval = setInterval(async () => {
   console.log('=== Queue monitoring check started ===');
