@@ -14,7 +14,7 @@ Spotify's built-in shuffle algorithm is notoriously bad - it doesn't truly shuff
 - ✅ Detects when user takes control and stops interfering
 - ✅ Simple HTTP API for control
 - ✅ Self-hosted and open-source
-- ✅ Docker support
+
 
 ## Prerequisites
 
@@ -33,15 +33,7 @@ Spotify's built-in shuffle algorithm is notoriously bad - it doesn't truly shuff
 3. Install dependencies: `npm install`
 4. Run the daemon: `npm start`
 
-## Docker Setup
 
-```bash
-# Build the image
-npm run docker:build
-
-# Run the container
-npm run docker:run
-```
 
 ## API Endpoints
 

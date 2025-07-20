@@ -4,9 +4,7 @@
   "description": "Spotify True Shuffle Daemon - A self-hosted daemon that implements true shuffle for Spotify playlists",
   "main": "src/index.js",
   "scripts": {
-    "start": "node src/index.js",
-    "docker:build": "docker build -t stsd .",
-    "docker:run": "docker run -p 3000:3000 stsd"
+    "start": "node src/index.js"
   },
   "keywords": [
     "spotify",

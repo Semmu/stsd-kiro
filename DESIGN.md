@@ -134,7 +134,7 @@ CREATE TABLE play_counts (
 - Least-played track selection algorithm
 - User intervention detection and graceful fallback
 - Error handling and recovery
-- Docker deployment optimization
+
 
 ## Configuration
 
