@@ -12,6 +12,8 @@ Generated playlists are among Spotify's most popular features:
 - **Discover Weekly**: Personalized weekly music discovery
 - **Daily Mix 1-6**: Genre-based mixes of user's music
 - **Release Radar**: New releases from followed artists
+- **Song Radio**: Algorithmic playlists based on a specific song
+- **Artist Radio**: Algorithmic playlists based on a specific artist
 - **Made for You playlists**: Various algorithmic recommendations
 
 For a true shuffle service to be useful, it needs to work with these playlists that users interact with most frequently.
@@ -25,7 +27,7 @@ We systematically tested **every available Spotify OAuth flow** to understand:
 4. **Inconsistencies** in API responses for identical endpoints
 
 ### Test Setup
-- **Target playlists**: Various generated playlists (Discover Weekly, Daily Mix, etc.)
+- **Target playlists**: Various generated playlists (Discover Weekly, Daily Mix, Song/Artist Radio, etc.)
 - **API endpoints tested**: 
   - `GET /v1/playlists/{id}` (playlist info)
   - `GET /v1/playlists/{id}/tracks` (playlist tracks)

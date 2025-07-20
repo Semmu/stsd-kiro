@@ -43,6 +43,8 @@ Spotify's built-in shuffle algorithm is notoriously bad - it doesn't truly shuff
 
 This is due to Spotify API restrictions on accessing tracks from algorithmically generated playlists. You'll need to start playing a regular user-created playlist or album before calling `/api/shuffle/start`.
 
+**📚 For detailed technical analysis of these limitations, see [SPOTIFY-API-LIMITATIONS.md](SPOTIFY-API-LIMITATIONS.md)** - This document contains comprehensive research into why these restrictions exist, what authentication methods were tested, and the implications for developers building Spotify tools.
+
 ## Prerequisites
 
 1. **Spotify Developer Account**: You need to create your own Spotify app
