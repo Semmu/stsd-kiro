@@ -892,6 +892,116 @@ class SpotifyClient {
         }
     }
 
+    // Generate PKCE code verifier and challenge
+    generatePKCE() {
+        const codeVerifier = Buffer.from(Array.from(crypto.getRandomValues(new Uint8Array(32)))).toString('base64url');
+        const codeChallenge = Buffer.from(require('crypto').createHash('sha256').update(codeVerifier).digest()).toString('base64url');
+        
+        return {
+            codeVerifier,
+            codeChallenge
+        };
+    }
+
+    // Get PKCE authorization URL
+    getPKCEAuthUrl(codeChallenge, state = null) {
+        const scopes = [
+            // Same comprehensive scopes as before
+            'user-read-playback-state',
+            'user-modify-playback-state', 
+            'user-read-currently-playing',
+            'streaming',
+            'playlist-read-private',
+            'playlist-read-collaborative',
+            'playlist-modify-private',
+            'playlist-modify-public',
+            'user-library-read',
+            'user-library-modify',
+            'user-follow-read',
+            'user-follow-modify',
+            'user-read-private',
+            'user-read-email',
+            'user-top-read',
+            'user-read-recently-played'
+        ];
+
+        const params = new URLSearchParams({
+            response_type: 'code',
+            client_id: process.env.SPOTIFY_CLIENT_ID,
+            scope: scopes.join(' '),
+            redirect_uri: process.env.SPOTIFY_REDIRECT_URI,
+            code_challenge_method: 'S256',
+            code_challenge: codeChallenge,
+            state: state || Math.random().toString(36).substring(7)
+        });
+
+        return `https://accounts.spotify.com/authorize?${params.toString()}`;
+    }
+
+    // Exchange PKCE authorization code for tokens
+    async handlePKCECallback(code, codeVerifier) {
+        try {
+            const response = await fetch('https://accounts.spotify.com/api/token', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded'
+                },
+                body: new URLSearchParams({
+                    grant_type: 'authorization_code',
+                    code: code,
+                    redirect_uri: process.env.SPOTIFY_REDIRECT_URI,
+                    client_id: process.env.SPOTIFY_CLIENT_ID,
+                    code_verifier: codeVerifier
+                })
+            });
+
+            const data = await response.json();
+
+            if (data.access_token) {
+                console.log('PKCE authentication successful');
+                console.log(`Access token: ${data.access_token.substring(0, 20)}...`);
+                console.log(`Refresh token: ${data.refresh_token ? data.refresh_token.substring(0, 20) + '...' : 'NONE'}`);
+                console.log(`Expires in: ${data.expires_in} seconds`);
+                
+                return {
+                    success: true,
+                    accessToken: data.access_token,
+                    refreshToken: data.refresh_token,
+                    expiresIn: data.expires_in
+                };
+            } else {
+                console.error('PKCE authentication failed:', data);
+                return { success: false, error: data };
+            }
+        } catch (error) {
+            console.error('Failed to handle PKCE callback:', error);
+            return { success: false, error: error.message };
+        }
+    }
+
+    // Test API call with PKCE token
+    async testPKCEToken(token, url) {
+        try {
+            const response = await fetch(url, {
+                method: 'GET',
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json',
+                    'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+                }
+            });
+
+            return {
+                status: response.status,
+                ok: response.ok,
+                data: response.ok ? await response.json() : await response.text()
+            };
+        } catch (error) {
+            console.error('PKCE token test failed:', error);
+            throw error;
+        }
+    }
+
     // Check if user is authenticated
     isUserAuthenticated() {
         return this.isAuthenticated;

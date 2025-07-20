@@ -1009,6 +1009,194 @@ app.get('/api/debug/implicit-token-test', async (req, res) => {
   }
 });
 
+// PKCE Flow Test Endpoints
+let pkceState = {}; // Store PKCE state temporarily
+
+// Start PKCE flow
+app.get('/api/debug/pkce-start', (req, res) => {
+  try {
+    const { codeVerifier, codeChallenge } = spotifyClient.generatePKCE();
+    const state = Math.random().toString(36).substring(7);
+
+    // Store PKCE state temporarily
+    pkceState[state] = { codeVerifier, codeChallenge };
+
+    const authUrl = spotifyClient.getPKCEAuthUrl(codeChallenge, state);
+
+    const response = {
+      message: 'PKCE flow started',
+      authUrl: authUrl,
+      state: state,
+      instructions: 'Visit the authUrl, complete authorization, then call /api/debug/pkce-callback with the code and state'
+    };
+
+    console.log('Debug: PKCE flow started successfully');
+    console.log(`Debug: Auth URL: ${authUrl}`);
+    console.log(`Debug: State: ${state}`);
+
+    res.json(response);
+  } catch (error) {
+    console.error('Failed to start PKCE flow:', error);
+    res.status(500).json({ error: 'Failed to start PKCE flow', details: error.message });
+  }
+});
+
+// Handle PKCE callback and test generated playlist access
+app.get('/api/debug/pkce-callback', async (req, res) => {
+  try {
+    const { code, state } = req.query;
+
+    if (!code || !state) {
+      console.log('Debug: PKCE callback - Missing code or state parameter');
+      return res.status(400).json({
+        error: 'Missing code or state parameter',
+        usage: 'Add ?code=AUTH_CODE&state=STATE_VALUE to the URL'
+      });
+    }
+
+    const storedState = pkceState[state];
+    if (!storedState) {
+      console.log(`Debug: PKCE callback - Invalid or expired state: ${state}`);
+      return res.status(400).json({ error: 'Invalid or expired state' });
+    }
+
+    console.log('Debug: Processing PKCE callback...');
+
+    // Exchange code for tokens
+    const tokenResult = await spotifyClient.handlePKCECallback(code, storedState.codeVerifier);
+
+    if (!tokenResult.success) {
+      console.log('Debug: PKCE token exchange failed:', tokenResult.error);
+      return res.status(400).json({
+        error: 'PKCE token exchange failed',
+        details: tokenResult.error
+      });
+    }
+
+    // Clean up state
+    delete pkceState[state];
+
+    // Get current playback to test with
+    if (!spotifyClient.isUserAuthenticated()) {
+      console.log('Debug: PKCE callback - No regular user authentication for context testing');
+      return res.status(400).json({
+        error: 'Need regular user authentication to get current context for testing'
+      });
+    }
+
+    const currentPlayback = await spotifyClient.getCurrentPlayback();
+    if (!currentPlayback || !currentPlayback.context) {
+      console.log('Debug: PKCE callback - No active playback context found');
+      return res.status(400).json({
+        error: 'No active playback context found for testing'
+      });
+    }
+
+    const contextUri = currentPlayback.context.uri;
+    const [, type, id] = contextUri.split(':');
+
+    if (type !== 'playlist') {
+      console.log(`Debug: PKCE callback - Not a playlist context: ${type}`);
+      return res.status(400).json({
+        error: 'This test only works with playlists',
+        contextType: type,
+        contextUri: contextUri
+      });
+    }
+
+    console.log(`Debug: Testing PKCE token for playlist: ${contextUri}`);
+
+    const experiments = {};
+
+    // Test playlist info with PKCE token
+    try {
+      const directUrl = `https://api.spotify.com/v1/playlists/${id}`;
+      console.log(`Debug: PKCE token - trying playlist info: ${directUrl}`);
+
+      const result = await spotifyClient.testPKCEToken(tokenResult.accessToken, directUrl);
+      console.log(`Debug: PKCE token playlist info - Status: ${result.status}, Success: ${result.ok}`);
+
+      if (result.ok) {
+        console.log(`Debug: PKCE token SUCCESS - Name: "${result.data.name}", Owner: ${result.data.owner?.id}, Public: ${result.data.public}, Tracks: ${result.data.tracks?.total}`);
+      } else {
+        console.log(`Debug: PKCE token FAILED - Error: ${JSON.stringify(result.data)}`);
+      }
+
+      experiments.playlist_info = {
+        url: directUrl,
+        status: result.status,
+        success: result.ok,
+        data: result.ok ? {
+          name: result.data.name,
+          owner: result.data.owner?.id,
+          public: result.data.public,
+          tracks_total: result.data.tracks?.total
+        } : result.data
+      };
+    } catch (error) {
+      console.log(`Debug: PKCE token playlist info EXCEPTION - ${error.message}`);
+      experiments.playlist_info = { error: error.message };
+    }
+
+    // Test playlist tracks with PKCE token
+    try {
+      const tracksUrl = `https://api.spotify.com/v1/playlists/${id}/tracks?limit=10`;
+      console.log(`Debug: PKCE token - trying playlist tracks: ${tracksUrl}`);
+
+      const result = await spotifyClient.testPKCEToken(tokenResult.accessToken, tracksUrl);
+      console.log(`Debug: PKCE token playlist tracks - Status: ${result.status}, Success: ${result.ok}`);
+
+      if (result.ok) {
+        console.log(`Debug: PKCE token tracks SUCCESS - Total: ${result.data.total}, Retrieved: ${result.data.items?.length || 0}, First track: "${result.data.items?.[0]?.track?.name || 'none'}"`);
+      } else {
+        console.log(`Debug: PKCE token tracks FAILED - Error: ${JSON.stringify(result.data)}`);
+      }
+
+      experiments.playlist_tracks = {
+        url: tracksUrl,
+        status: result.status,
+        success: result.ok,
+        data: result.ok ? {
+          total: result.data.total,
+          tracks_count: result.data.items?.length || 0,
+          first_track: result.data.items?.[0]?.track?.name || null
+        } : result.data
+      };
+    } catch (error) {
+      console.log(`Debug: PKCE token playlist tracks EXCEPTION - ${error.message}`);
+      experiments.playlist_tracks = { error: error.message };
+    }
+
+    const response = {
+      message: 'PKCE Flow test completed',
+      tokenInfo: {
+        hasAccessToken: !!tokenResult.accessToken,
+        hasRefreshToken: !!tokenResult.refreshToken,
+        expiresIn: tokenResult.expiresIn
+      },
+      contextUri: contextUri,
+      playlistId: id,
+      experiments: experiments
+    };
+
+    console.log('Debug: PKCE Flow test completed successfully');
+    console.log(`Debug: Has access token: ${!!tokenResult.accessToken}`);
+    console.log(`Debug: Has refresh token: ${!!tokenResult.refreshToken}`);
+    console.log(`Debug: Token expires in: ${tokenResult.expiresIn} seconds`);
+    console.log(`Debug: Playlist info success: ${experiments.playlist_info?.success}`);
+    console.log(`Debug: Playlist tracks success: ${experiments.playlist_tracks?.success}`);
+
+    res.json(response);
+
+  } catch (error) {
+    console.error('Debug: Failed PKCE callback test:', error);
+    res.status(500).json({
+      error: 'Failed PKCE callback test',
+      details: error.message
+    });
+  }
+});
+
 // Background queue monitoring - runs every 20 seconds
 const queueMonitoringInterval = setInterval(async () => {
   console.log('=== Queue monitoring check started ===');
