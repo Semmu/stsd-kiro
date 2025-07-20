@@ -33,11 +33,11 @@ STSD implements a true shuffle algorithm that:
 
 ### Key Files
 
-- `src/index.js` - Main server and API endpoints
-- `src/spotify.js` - Spotify API client and OAuth handling
-- `src/database.js` - SQLite operations for play count tracking
-- `src/shuffleState.js` - Internal state management
-- `.env` - Configuration (Spotify API keys, etc.)
+- `src/index.js` - Main server, API endpoints, and queue management logic
+- `src/spotify.js` - Spotify API client, OAuth handling, and playlist operations
+- `src/database.js` - SQLite operations for play count tracking and least-played selection
+- `src/shuffleState.js` - Internal state management and STSD playlist tracking
+- `.env` - Configuration (Spotify API keys, target queue size, etc.)
 - `shuffle.db` - SQLite database (auto-created)
 - `.tokens.json` - Persisted OAuth tokens (auto-created)
 
@@ -61,38 +61,49 @@ CREATE TABLE play_counts (
 - `GET /auth/callback` - OAuth callback handler
 
 ### Control
-- `GET /api/shuffle/start/spotify:playlist:ID` - Start managing shuffle for playlist
-- `GET /api/shuffle/start/spotify:album:ID` - Start managing shuffle for album
+- `GET /api/shuffle/start` - Start managing shuffle for currently playing context (auto-detects)
 
 ### Status
 - `GET /api/status` - Daemon status, user info, current shuffle state
 - `GET /health` - Health check
 
+### Debug Endpoints
+- `GET /api/debug/reset-counts` - Reset all play counts to zero
+- `GET /api/debug/current-playback` - Check current Spotify playback state
+- `GET /api/debug/library-access` - Test access to user's library
+- `GET /api/debug/context-tracks` - Debug context track fetching
+- `GET /api/debug/experimental` - Experimental playlist access methods
+
 ## Core Logic Flow
 
 ### Starting Shuffle
-1. User calls `/api/shuffle/start/spotify:playlist:ID`
-2. Check if already managing this context (idempotent)
-3. Fetch all tracks from Spotify API (handles pagination)
-4. Sync tracks with database (add new, preserve existing play counts)
-5. Start internal state management
-6. Return success with track count
+1. User calls `/api/shuffle/start` (no parameters needed)
+2. Auto-detect currently playing context from Spotify
+3. Check if already managing this context (idempotent)
+4. Fetch all tracks from Spotify API (handles pagination)
+5. Sync tracks with database (add new, preserve existing play counts)
+6. Create fresh STSD playlist for this shuffle session
+7. Add one least-played track to the playlist
+8. Start playback of the STSD playlist
+9. Add remaining tracks to Spotify queue (up to PLAYLIST_TARGET_SIZE)
+10. Start internal state management and background monitoring
 
-### Background Monitoring (every 30 seconds)
+### Background Monitoring (every 20 seconds)
 1. Check if shuffle is active and user is authenticated
 2. Get current Spotify playback state
-3. Determine if we should take control:
-   - Nothing playing → take control
-   - Different context → take control
-   - Same context but different track (user skipped) → take control
-   - Same track we managed → keep monitoring
-4. If taking control: implement queue management (TODO)
+3. Only manage if playing from our STSD playlist
+4. Get current queue and filter out duplicates
+5. Check how many of our managed tracks are still in queue
+6. Add more least-played tracks if queue is running low
+7. Maintain target queue size for continuous playback
 
-### Queue Management (TODO - Next Phase)
-1. Query database for least-played tracks in current context
-2. Add next few tracks to Spotify queue
-3. Update play counts when tracks finish
-4. Detect when user intervenes and stop managing
+### Queue Management (Implemented)
+1. Query database for tracks with minimum play count
+2. Randomly select from least-played tracks to avoid predictability
+3. Add selected tracks to Spotify queue with safety delays
+4. Increment play counts immediately when tracks are queued
+5. Filter out duplicate tracks caused by Spotify API bugs
+6. Maintain continuous playback with target queue size
 
 ## Design Decisions
 
@@ -117,6 +128,19 @@ CREATE TABLE play_counts (
 - Can paste Spotify URIs directly into URLs
 - Idempotent operations (safe to repeat)
 
+### Why STSD Playlists?
+- Creates temporary playlists named "STSD - [Original Context]"
+- Avoids conflicts with user's original playlists
+- Enables precise queue control through playlist + queue combination
+- Automatically cleaned up by creating fresh playlists for each session
+- Works around Spotify API limitations with queue management
+
+### Why Auto-Context Detection?
+- User just needs to start playing something and call `/api/shuffle/start`
+- No need to copy/paste Spotify URIs manually
+- Seamless integration with normal Spotify usage
+- Handles both playlists and albums automatically
+
 ## Current Status
 
 ### Implemented ✅
@@ -125,15 +149,22 @@ CREATE TABLE play_counts (
 - SQLite database with play count tracking
 - Internal state management
 - Context track fetching and database sync
-- Background monitoring framework
+- Background monitoring framework (every 20 seconds)
 - User-friendly API endpoints
+- **Queue management logic** - Creates STSD playlists and manages queue
+- **Play count increment** - Tracks are marked as played when added to queue
+- **Least-played track selection** - Randomly selects from tracks with minimum play count
+- **STSD playlist creation** - Creates fresh playlists for each shuffle session
+- **Auto-context detection** - Detects currently playing context automatically
+- **Queue filtering** - Removes duplicate tracks from Spotify API bugs
+- **Comprehensive debug endpoints** - Multiple debugging tools for troubleshooting
 
-### TODO - Next Phase
-- Queue management logic (add tracks to Spotify queue)
-- Play count increment when tracks finish
-- Least-played track selection algorithm
+### TODO - Future Enhancements
 - User intervention detection and graceful fallback
-- Error handling and recovery
+- Better error handling and recovery
+- Web UI for easier control
+- Multiple device support
+- Advanced shuffle algorithms (weighted, mood-based)
 
 
 ## Configuration
@@ -144,17 +175,21 @@ SPOTIFY_CLIENT_ID=your_client_id
 SPOTIFY_CLIENT_SECRET=your_client_secret  
 SPOTIFY_REDIRECT_URI=http://127.0.0.1:3000/auth/callback
 PORT=3000
+PLAYLIST_TARGET_SIZE=5
 ```
 
 ### Spotify App Requirements
 - Web API access (not Web Playback SDK)
 - Redirect URI: `http://127.0.0.1:3000/auth/callback`
 - Required scopes:
-  - `user-read-playback-state`
-  - `user-modify-playback-state`
-  - `user-read-currently-playing`
-  - `playlist-read-private`
-  - `playlist-read-collaborative`
+  - `user-read-playback-state` - Read current playback state
+  - `user-modify-playback-state` - Control playback and queue
+  - `user-read-currently-playing` - Get currently playing track
+  - `playlist-read-private` - Read user's private playlists
+  - `playlist-read-collaborative` - Read collaborative playlists
+  - `playlist-modify-public` - Create and modify STSD playlists
+  - `playlist-modify-private` - Create and modify private STSD playlists
+  - `user-library-read` - Access user's saved tracks/albums (for debugging)
 
 ## Development Notes
 
@@ -163,12 +198,19 @@ PORT=3000
 - UPSERT pattern is perfect for play count increment logic
 - Internal state management prevents false positives when detecting control
 - Dynamic playlist sync ensures we always work with current content
+- **STSD playlist approach** works better than direct queue management
+- **Random selection from least-played** prevents predictable shuffle patterns
+- **Spotify API queue bugs** require filtering duplicate tracks
+- **Auto-context detection** makes the UX much smoother
+- **Generated playlists** (Discover Weekly, etc.) require special handling
 
 ### Testing Approach
 - Use GET endpoints for easy manual testing
-- Copy Spotify URIs directly from client
-- Monitor server logs for debugging
-- Check `/api/status` for current state
+- Start playing any playlist/album, then call `/api/shuffle/start`
+- Monitor server logs for detailed debugging information
+- Check `/api/status` for current shuffle state
+- Use debug endpoints for troubleshooting specific issues
+- Test with both user-created and Spotify-generated playlists
 
 ## Future Enhancements
 

@@ -53,10 +53,21 @@ Spotify's built-in shuffle algorithm is notoriously bad - it doesn't truly shuff
 
 ## API Endpoints
 
+### Core Endpoints
 - `GET /health` - Health check
-- `GET /api/status` - Daemon status
-- `POST /api/shuffle/start` - Start shuffling a context (playlist/album)
-- `POST /api/shuffle/stop` - Stop shuffling
+- `GET /api/status` - Daemon status and current shuffle state
+- `GET /api/shuffle/start` - Start shuffling current playing context (auto-detects playlist/album)
+
+### Authentication
+- `GET /auth/login` - Start Spotify OAuth flow
+- `GET /auth/callback` - OAuth callback handler
+
+### Debug Endpoints
+- `GET /api/debug/reset-counts` - Reset all play counts to zero
+- `GET /api/debug/current-playback` - Check current Spotify playback state
+- `GET /api/debug/library-access` - Test access to user's library
+- `GET /api/debug/context-tracks` - Debug context track fetching
+- `GET /api/debug/experimental` - Experimental playlist access methods
 
 ## Development
 
