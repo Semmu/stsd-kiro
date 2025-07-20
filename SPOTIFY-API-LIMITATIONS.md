@@ -2,7 +2,7 @@
 
 ## Background & Motivation
 
-This document details extensive research conducted in January 2025 to understand why **Spotify's generated playlists** (Discover Weekly, Daily Mix, Release Radar, etc.) cannot be accessed through standard API methods, and the implications for building background music services.
+This document details extensive research conducted in July 2025 to understand why **Spotify's generated playlists** (Discover Weekly, Daily Mix, Release Radar, etc.) cannot be accessed through standard API methods, and the implications for building background music services.
 
 ### The Problem
 We were building **STSD (Spotify True Shuffle Daemon)** - a background service that implements true shuffle for Spotify playlists by tracking play counts and prioritizing least-played tracks. While the service worked perfectly with user-created playlists, it consistently failed to access Spotify's generated playlists with **404 "Resource not found"** errors.
@@ -230,7 +230,7 @@ Attempting to use Implicit Grant tokens in server-side Node.js:
 **Exportify** (https://github.com/watsonbox/exportify) successfully exports generated playlists:
 - Uses **Implicit Grant Flow** exclusively
 - Runs entirely client-side in browser
-- Still functional as of January 2025
+- Still functional as of July 2025
 - Confirms our findings about Implicit Grant permissions
 
 ### Other Tools
@@ -308,5 +308,5 @@ This represents a broader trend in platform APIs becoming more restrictive over 
 
 ---
 
-*Research conducted January 2025 for STSD (Spotify True Shuffle Daemon) project*
+*Research conducted July 2025 for STSD (Spotify True Shuffle Daemon) project*
 *All findings verified through systematic testing and cross-referenced with community tools*
